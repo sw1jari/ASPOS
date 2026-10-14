@@ -13,6 +13,7 @@ from src.policy import Shield, SACPolicy, ProjectionPolicy, CBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
+from benchmarks.noisy_obs import NoisyObservation
 from pytorch_soft_actor_critic.replay_memory import ReplayMemory
 import gymnasium as gym 
 import matplotlib.pyplot as plt
@@ -24,6 +25,9 @@ import traceback
 def main(args):
     torch.set_num_threads(args.threads)
     env = envs.get_env_from_name(args.env_name)
+    noise_scale = args.noise_alpha if args.noise_dist == 'uniform' else args.noise_sigma
+    if args.noise_dist != 'none':
+        env = NoisyObservation(env, args.noise_dist, noise_scale, args.seed)
     
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -36,7 +40,11 @@ def main(args):
     if not os.path.exists("runs_sac"):
         os.makedirs("runs_sac")
         
-    name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_SAC_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.gamma}_S{args.seed}{'_safe' if not args.no_safety else ''}"
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    run_params = f"H{args.horizon}_D{args.red_dim}_G{args.gamma}_S{args.seed}"
+    safe_suffix = '_safe' if not args.no_safety else ''
+    noise_suffix = f'_N{args.noise_dist}{noise_scale}' if args.noise_dist != 'none' else ''
+    name = f"{timestamp}_SAC_{args.env_name}_{run_params}{safe_suffix}{noise_suffix}"
     writer = SummaryWriter(f'runs_sac/{name}')
 
     print(hyperparams)
@@ -105,7 +113,8 @@ def main(args):
                 
                 trajectory.append(next_state)
                 
-                if env.unsafe(next_state, False):
+                # Safety is judged on the true state
+                if env.unsafe(info.get('true_state', next_state), False):
 
                     real_unsafe_episodes += 1 * (not unsafe_flag)
                     # episode_reward -= 100 * (not unsafe_flag)
@@ -286,7 +295,7 @@ def main(args):
 
                     if episode_steps >= env._max_episode_steps:
                         done = True
-                    if env.unsafe(next_state, False):
+                    if env.unsafe(info.get('true_state', next_state), False):
                         print("UNSAFE Inside testing", shielded)
                         # episode_reward += -100
                         print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
@@ -384,6 +393,10 @@ if __name__ == "__main__":
     parser.add_argument('--render', default=False, action='store_true')
     parser.add_argument('--cbf_gamma', default=0.7, type=float)
     parser.add_argument('--percentile', default=99, type=int)
+    parser.add_argument('--noise_dist', default='none', choices=['none', 'uniform', 'gaussian'],
+                        help='Observation noise o = s + v, none keeps the env fully observable')
+    parser.add_argument('--noise_alpha', type=float, default=0.0, help='uniform: v ~ U(-alpha, alpha)')
+    parser.add_argument('--noise_sigma', type=float, default=0.0, help='gaussian: v ~ N(0, sigma^2)')
     parser.add_argument('--dynamics', default=None, type=str)
 
 
