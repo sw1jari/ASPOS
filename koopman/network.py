@@ -15,7 +15,7 @@ class KoopmanDataset(Dataset):
     A simple dataset for Koopman training.
     Each sample consists of a sequence of states, a sequence of actions,
     and a corresponding sequence of next states.
-    
+
     Assumptions:
        - states: np.ndarray or torch.Tensor of shape (N, horizon+1, state_dim)
        - actions: np.ndarray or torch.Tensor of shape (N, horizon, action_dim)
@@ -100,8 +100,8 @@ class StateEmbedding(nn.Module):
         else:
             # Return an empty tensor with the correct batch size and device
             return torch.empty(s.shape[0], 0, device=s.device)
-    
-    
+
+
 class KoopmanOperator(nn.Module):
     """
     Implements the Koopman operator for multi-step prediction with affine term:
@@ -112,7 +112,7 @@ class KoopmanOperator(nn.Module):
     """
     def __init__(self, state_dim, embed_dim, control_dim):
         super(KoopmanOperator, self).__init__()
-        
+
         embed_total_dim = state_dim + embed_dim
         # Apply spectral norm to the linear operators for stability
         self.A = nn.Linear(embed_total_dim, embed_total_dim, bias=False)
@@ -156,13 +156,13 @@ class KoopmanLightning(pl.LightningModule):
         """
         super(KoopmanLightning, self).__init__()
         self.save_hyperparameters()
-        
+
         embed_total_dim = state_dim + embed_dim
-        
+
         self.embedding_net = StateEmbedding(state_dim, embed_dim)
         self.koopman_operator = KoopmanOperator(state_dim, embed_dim, control_dim)
         self.criterion = nn.MSELoss()
-        
+
         if self.hparams.embed_dim == 0:
             self.hparams.w_recon = 0.0
             self.hparams.w_cons = 0.0
@@ -185,7 +185,7 @@ class KoopmanLightning(pl.LightningModule):
         states = batch['states']
         actions = batch['actions']
         next_states = batch['next_states']
-        
+
         B, H, S_dim = next_states.shape
 
         # 1. Multi-step prediction
@@ -204,7 +204,7 @@ class KoopmanLightning(pl.LightningModule):
 
         # # 4. Consistency loss (as in original code)
         decoded_states = pred_latents[:, :, :S_dim]
-        
+
         reencoded_latents = self.embedding_net(decoded_states.reshape(B * H, -1)).reshape(B, H, -1)
         consistency_loss = self.criterion(reencoded_latents[:,:,S_dim:], pred_latents[:,:,S_dim:])
         # consistency_loss = torch.tensor(0.0, device=self.device)
@@ -230,14 +230,14 @@ class KoopmanLightning(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # 1. Calculate Original Losses
         losses = self._calculate_losses(batch)
-        
+
         # Original weighted sum
         total_loss = (
             self.hparams.w_pred * losses['pred'] + 
             self.hparams.w_recon * losses['recon'] + 
             self.hparams.w_cons * losses['cons']
         )
-        
+
         # 2. Get the Matrix Weights
         A_w = self.koopman_operator.A.weight
         B_w = self.koopman_operator.B.weight
@@ -251,7 +251,7 @@ class KoopmanLightning(pl.LightningModule):
         # Cols state_dim to end (Feature inputs)
         s_dim = self.embedding_net.state_dim
         leakage_block = A_w[:s_dim, s_dim:]
-        
+
         # We use L1 norm to encourage zeros (sparsity) in this block
         # You need a weight for this (e.g., 0.1 or 1.0)
         w_coupling = 0.00
@@ -259,10 +259,10 @@ class KoopmanLightning(pl.LightningModule):
 
         # 5. Sum Everything
         final_loss = total_loss + l1_penalty + coupling_loss
-        
+
         self.log('train_loss', final_loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log('ev', losses['ev'], on_step = False, on_epoch = True, prog_bar=True) # Monitor this!
-        
+
         return final_loss
 
     def validation_step(self, batch, batch_idx):
@@ -289,16 +289,16 @@ class KoopmanLightning(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         return optimizer
-    
+
     def transition(self, z=None, z_1=None, u=None):
         A, B, c = self.koopman_operator.get_koopman_operators(z, u)
         return A, B, c
-    
+
     @torch.no_grad()
     def get_eps(self, z, u):
         # Placeholder for error estimation
         return 0.01
-    
+
     @torch.no_grad()
     def transform(self, x):
         """
@@ -308,7 +308,7 @@ class KoopmanLightning(pl.LightningModule):
         if x.dim() == 1:
             x = x.unsqueeze(0)
         return self.embedding_net(x).cpu().numpy()
-    
+
     @torch.no_grad()
     def get_next_state(self, states, actions):
         """
@@ -319,7 +319,7 @@ class KoopmanLightning(pl.LightningModule):
 
         z = self.embedding_net(states)
         z_next = self.koopman_operator(z, actions)
-        
+
         return z_next.cpu().numpy()
 
     def update_stats(self, mean, std):
@@ -341,8 +341,8 @@ def fit_koopman(states, actions, next_states, koopman_model, horizon, epochs=100
 
     trainer = pl.Trainer(max_epochs=epochs, accelerator="gpu", devices=1, check_val_every_n_epoch=5)
     trainer.fit(koopman_model, train_loader, val_loader)
-    
+
     print(koopman_model.koopman_operator.get_koopman_operators(None, None))
-    
+
     torch.cuda.empty_cache()
 

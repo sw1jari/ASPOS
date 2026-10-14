@@ -99,6 +99,7 @@ class ProjectionPolicy:
 
         # --- Cache Attributes ---
         self._A, self._B, self._c = None, None, None
+        self._alpha = None
 
         self._precomputed_F = {}
         self._precomputed_h_base = {}
@@ -129,7 +130,7 @@ class ProjectionPolicy:
         )
 
         self._A, self._B, self._c = mat_dyn[:, :self.s_dim], mat_dyn[:, self.s_dim:-1], mat_dyn[:, -1]
-        
+ 
         # adaptive_info is now (V_0, eps_0)
         self.V0_nominal, self.eps0_nominal = adaptive_info
         self.is_adaptive = self.env.adaptive_error

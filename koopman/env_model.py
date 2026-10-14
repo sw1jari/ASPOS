@@ -45,7 +45,7 @@ class KoopmanLinearModel:
         self.adaptive_error = adaptive_error
         self.use_pca = use_pca
         self.ood_thresh_factor = ood_thresh_factor
-        
+
         # Fallbacks: Global bound is now a single vector (D,)
         self.global_bound = np.zeros(self.s_dim)
 
@@ -54,7 +54,7 @@ class KoopmanLinearModel:
         self.cluster_rotations: Optional[List[np.ndarray]] = None # List of size K
         self.cluster_bounds: Optional[List[np.ndarray]] = None     # List of size K
         self.cluster_radii: Optional[np.ndarray] = None 
-        
+
         # Diagnostics
         self.stored_residuals: Optional[np.ndarray] = None # Shape (N, D)
         self.stored_z: Optional[np.ndarray] = None
@@ -82,12 +82,12 @@ class KoopmanLinearModel:
         self.cluster_rotations = []
         self.cluster_bounds = []
         self.cluster_radii = np.zeros(n_clusters)
-        
+
         print(f"Computing 1-Step Cluster Stats (K={n_clusters}, PCA={self.use_pca})...")
-        
+
         for k in range(n_clusters):
             mask = (labels == k)
-            
+
             # --- 1. CLUSTER RADIUS (Based on Initial State z_0) ---
             if np.sum(mask) > 0:
                 cluster_points = z_train[mask]
@@ -105,14 +105,14 @@ class KoopmanLinearModel:
 
             # Shape: (N_in_cluster, s_dim)
             err_k = residuals[mask]
-            
+
             # --- ADAPTIVE BOUND CALCULATION ---
             if self.use_pca:
                 # A. PCA (Oriented Bounding Box - OBB)
                 pca = PCA(n_components=None)
                 pca.fit(err_k)
                 V = pca.components_.T  # Rotation Matrix
-                
+
                 # B. Rotate residuals
                 residuals_aligned = err_k @ V 
             else:
@@ -121,7 +121,7 @@ class KoopmanLinearModel:
                 residuals_aligned = err_k # Residuals are already aligned with original axes
 
             # --- HYBRID BOUND CALCULATION ---
-            
+
             # 1. Empirical Worst-Case (diff): Max magnitude along the aligned axes
             # (This replaces the percentile calculation)
             diff = np.percentile(np.abs(residuals_aligned), percentile, axis=0)
@@ -129,14 +129,14 @@ class KoopmanLinearModel:
             # 2. Statistical Confidence Term (conf): Based on error standard deviation
             # Note: np.std computes std over the columns (axes), using axis=0
             sigma_error_aligned = np.std(residuals_aligned, axis=0)
-            
+
             # 3. Apply Statistical Factor (e.g., 3-sigma or Chi-squared equivalent)
             # We use a simple 3-sigma rule here, but you can swap in the Chi-squared term if scipy is available
             conf = sigma_error_aligned * STATISTICAL_CONFIDENCE_FACTOR 
-            
+
             # 4. Hybrid Bound: Max Observed + Statistical Buffer
             eps_hybrid = diff + conf 
-            
+
             # --- Spectral Pruning (Still applies to OBB/PCA bounds) ---
             if self.use_pca:
                 # Use PCA explained variance for pruning
@@ -144,11 +144,11 @@ class KoopmanLinearModel:
                 n_keep = np.searchsorted(expl_var, variance_threshold) + 1
                 if n_keep < self.s_dim:
                     eps_hybrid[n_keep:] = 1e-6
-            
+
             # Final update
             self.cluster_rotations.append(V)
             self.cluster_bounds.append(eps_hybrid)
-    
+
     def predict_trajectory(self, states: np.ndarray, actions: np.ndarray) -> np.ndarray:
         states_tensor = torch.tensor(states, dtype=torch.float32, device=self.device)
         actions_tensor = torch.tensor(actions, dtype=torch.float32, device=self.device)
@@ -178,7 +178,7 @@ class KoopmanLinearModel:
         with torch.no_grad():
             A, B, c = self.koopman_model.transition()
         M = np.hstack((A.cpu().numpy(), B.cpu().numpy(), c.cpu().numpy()[:, None]))
-        
+
         # Default Fallback (Global Bound)
         fallback_info = (np.eye(self.s_dim), self.global_bound)
 
@@ -196,7 +196,7 @@ class KoopmanLinearModel:
         dists_to_centroids = self.kmeans_model.transform(z_np)[0]
         cluster_idx = np.argmin(dists_to_centroids)
         dist_to_center = dists_to_centroids[cluster_idx]
-        
+
         # --- OOD CHECK ---
         max_radius = self.cluster_radii[cluster_idx]
         if dist_to_center > (max_radius * self.ood_thresh_factor):
@@ -205,7 +205,7 @@ class KoopmanLinearModel:
         # 4. Return Single Adaptive Bound
         V = self.cluster_rotations[cluster_idx]
         eps = self.cluster_bounds[cluster_idx]
-        
+
         return M, (V, eps)
 
     def __str__(self):
@@ -232,7 +232,7 @@ def compute_pca_bounds_for_cluster(
         eigenvalues, V = np.linalg.eigh(covariance)
         residuals_rot = residuals @ V
         eps_pca = np.percentile(np.abs(residuals_rot), percentile, axis=0)
-        
+
         # Spectral Pruning logic
         total_var = np.sum(eigenvalues)
         if total_var > 1e-9:
@@ -246,7 +246,7 @@ def compute_pca_bounds_for_cluster(
         # No PCA calculation (AABB)
         V = np.eye(dim)
         eps_pca = np.percentile(np.abs(residuals), percentile, axis=0)
-            
+
     return V, eps_pca
 
 
@@ -262,7 +262,7 @@ def auto_tune_clusters(
     Sweeps K and selects the optimal cluster count using the Elbow Method (Kneedle).
     """
     residuals_metric = residuals 
-    
+
     N = z_data.shape[0]
     max_k = int(N / min_samples_per_cluster)
     raw_candidates = [10, 50, 100, 200, 500, 1000] + [max_k]
@@ -290,7 +290,7 @@ def auto_tune_clusters(
                 # Fallback for small clusters
                 V = np.eye(residuals_metric.shape[1])
                 eps = np.percentile(np.abs(residuals_metric), percentile, axis=0)
-            
+
             eps = np.maximum(eps, 1e-9)
             current_pca_bounds[cluster_idx] = eps
             current_rotations.append(V)
@@ -310,7 +310,7 @@ def auto_tune_clusters(
         scores = np.array([r['score'] for r in results_history])
         ks_norm = (ks - ks.min()) / (ks.max() - ks.min())
         scores_norm = (scores.max() - scores) / (scores.max() - scores.min())
-        
+
         start_point = np.array([ks_norm[0], scores_norm[0]])
         end_point = np.array([ks_norm[-1], scores_norm[-1]])
         line_vec = end_point - start_point
@@ -356,7 +356,7 @@ def get_environment_model(
     # 2. Train Koopman
     if koopman_model is None:
         koopman_model = KoopmanLightning(state_shape, latent_dim, actions.shape[-1], horizon)
-    
+
     fit_koopman(input_states_norm, actions, output_states_norm, koopman_model, horizon, epochs=epochs)
 
     linear_model = KoopmanLinearModel(
@@ -380,7 +380,7 @@ def get_environment_model(
     for i in range(eval_horizon):
         pred_x = pred_latents_traj[:, i, :state_shape]
         true_x = true_latents_traj[:, i, :state_shape]
-        
+
         ev_score = explained_variance_score(true_x.flatten(), pred_x.flatten())
         r2 = r2_score(true_x.flatten(), pred_x.flatten())
         print(f"Horizon {i}: EV={ev_score:.4f}, R2={r2:.4f}")
@@ -391,7 +391,7 @@ def get_environment_model(
     # 5. Error Calculation (1-STEP ONLY)
     # Shape: (N, D)
     signed_residuals = true_latents_traj[:, 0, :] - pred_latents_traj[:, 0, :]
-    
+
     # Global Bound is now a single vector (D,)
     linear_model.global_bound = np.percentile(np.abs(signed_residuals), percentile, axis=0)
     print(f"\nComputed Global Error Bound: {linear_model.global_bound}...")
@@ -426,14 +426,14 @@ def get_environment_model(
     try:
         dataset_size = input_states.shape[0]
         state_shape = input_states.shape[-1]
-        
+
         # We only plot the single step (h=0) data
         step_res = signed_residuals 
         step_bound = linear_model.global_bound 
 
         plt.figure(figsize=(10, 6))
         plt.boxplot(step_res)
-        
+
         # Overlay Global Bound
         feature_indices = np.arange(1, step_res.shape[1] + 1)
         plt.plot(feature_indices, step_bound, 'r*', label=f'{percentile}th % Bound', markersize=10)
@@ -447,28 +447,28 @@ def get_environment_model(
             residuals = linear_model.stored_residuals # 1-step residuals
             labels = kmeans.labels_
             centers = kmeans.cluster_centers_
-            
+
             # Center residuals will store the worst-case signed error for each cluster
             center_residuals = np.zeros((len(centers), residuals.shape[1]))
-            
+
             for k in range(len(centers)):
                 mask = (labels == k)
                 if np.sum(mask) == 0:
                     continue
-                    
+
                 cluster_res = residuals[mask]
                 abs_cluster_res = np.abs(cluster_res)
                 max_indices = np.argmax(abs_cluster_res, axis=0)
-                
+
                 # Construct the worst-case signed vector
                 for d in range(residuals.shape[1]):
                     center_residuals[k, d] = cluster_res[max_indices[d], d]
-            
+
             # Check bounds on raw center errors
             in_bound = np.abs(center_residuals) <= step_bound
             safe_counts = np.sum(np.all(in_bound, axis=1))
             print(f"  {safe_counts}/{len(centers)} Cluster Centers have residuals within Global Bound.")
-            
+
             for f in range(state_shape):
                 x_vals = np.full(len(centers), f + 1)
                 y_vals = center_residuals[:, f]
