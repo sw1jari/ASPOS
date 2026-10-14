@@ -223,7 +223,7 @@ class ProjectionPolicy:
 
         # 0. State Pre-processing
         state = self.transform(state.reshape(1, -1)).reshape(-1,)
-        
+ 
         if action is None:
             action = np.zeros(u_dim)
 
@@ -388,7 +388,7 @@ class ProjectionPolicy:
         # 0. Initial Setup and State Transformation
         with torch.no_grad():
             z = self.transform(state.reshape(1, -1)).reshape(-1,)
-        
+
         s_dim = self.s_dim
         u_dim = self.u_dim
 
@@ -578,12 +578,13 @@ class CBFPolicy:
         self.solvers = []
         self.precomputed_per_poly = []
 
+        # 1. Pre-compute powers and affine terms (same for all polys)
+        A_pows = [np.eye(self.s_dim)]
+        for _ in range(1, H_max + 1): A_pows.append(A_pows[-1] @ A)
+        C_list = [np.zeros(self.s_dim)]
+        for j in range(1, H_max + 1): C_list.append(C_list[-1] + A_pows[j - 1] @ c)
+
         for poly in self.safe_polys:
-            # 1. Pre-compute powers and affine terms (same for all polys)
-            A_pows = [np.eye(self.s_dim)]
-            for _ in range(1, H_max + 1): A_pows.append(A_pows[-1] @ A)
-            C_list = [np.zeros(self.s_dim)]
-            for j in range(1, H_max + 1): C_list.append(C_list[-1] + A_pows[j - 1] @ c)
 
             # 2. Pre-compute face info for the current polyhedron
             print(poly.shape)
@@ -609,6 +610,7 @@ class CBFPolicy:
                 )
                 for p, _, _ in face_info
             }
+            pomdp_factor = self.alpha * np.linalg.norm(p, ord=1)
 
             # 4. Build global constraint matrices for this polyhedron
             G_rows, M_h_rows, v_h_rows, row_ptrs = [], [], [], [[] for _ in range(H_max)]
@@ -621,7 +623,7 @@ class CBFPolicy:
                     G_rows.append(sp.csr_matrix(p @ phi_j))
                     M_h_rows.append(-p @ A_pows[j] + (self.gamma ** j) * p)
                     tighten = tighten_pref[tuple(p)][j - 1]
-                    v_h_rows.append(-p @ C_list[j] - b - tighten + (self.gamma ** j) * b)
+                    v_h_rows.append(-p @ C_list[j] - b - tighten + (self.gamma ** j) * (b - pomdp_factor) - pomdp_factor)
                     row_ptrs[j - 1].append(len(G_rows) - 1)
 
             G_all = (
@@ -640,13 +642,13 @@ class CBFPolicy:
             lb_actions = np.tile(self.action_space.low, H_max)
             ub_actions = np.tile(self.action_space.high, H_max)
             A_qp = sp.vstack([G_all, sp.eye(H_max * self.u_dim, format="csc")], format="csc")
-            
+ 
             solver = osqp.OSQP()
             solver.setup(P=Pmat, q=np.zeros(H_max * self.u_dim), A=A_qp,
                           l=np.hstack([-np.inf * np.ones(G_all.shape[0]), lb_actions]),
                           u=np.hstack([np.zeros(G_all.shape[0]), ub_actions]),
                           verbose=False, polish=False)
-            
+
             self.solvers.append(solver)
             self.precomputed_per_poly.append({
                 "M_h": M_h, "v_h": v_h, "row_ptrs": row_ptrs,
