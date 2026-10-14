@@ -99,7 +99,6 @@ class ProjectionPolicy:
 
         # --- Cache Attributes ---
         self._A, self._B, self._c = None, None, None
-        self._alpha = None
 
         self._precomputed_F = {}
         self._precomputed_h_base = {}
@@ -515,7 +514,8 @@ class CBFPolicy:
         unsafe_polys: List[np.ndarray],
         safe_polys: List[np.ndarray],
         transform=lambda x: x,
-        gamma=0.7
+        gamma=0.7,
+        alpha=0.1
     ):
         """
         Args:
@@ -543,6 +543,7 @@ class CBFPolicy:
         self.saved_action = None
         self.shielded = False
         self.gamma = gamma
+        self._alpha = None
 
         # --- Placeholders for the pre-computed model and solver ---
         self.precomputed = {}
@@ -610,7 +611,7 @@ class CBFPolicy:
                 )
                 for p, _, _ in face_info
             }
-            pomdp_factor = self.alpha * np.linalg.norm(p, ord=1)
+            pomdp_factor = self._alpha * np.linalg.norm(p, ord=1)
 
             # 4. Build global constraint matrices for this polyhedron
             G_rows, M_h_rows, v_h_rows, row_ptrs = [], [], [], [[] for _ in range(H_max)]

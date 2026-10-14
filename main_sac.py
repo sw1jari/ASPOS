@@ -36,6 +36,9 @@ def main(args):
     if not os.path.exists("runs_sac"):
         os.makedirs("runs_sac")
         
+    if not args.cbf_alpha:
+        args.cbf_alpha = 0.1
+    
     name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_SAC_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.gamma}_S{args.seed}{'_safe' if not args.no_safety else ''}"
     writer = SummaryWriter(f'runs_sac/{name}')
 
@@ -220,7 +223,8 @@ def main(args):
             if not args.wp:
                 shield = CBFPolicy(
                     env_model, new_obs_space, env.observation_space,
-                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform, args.cbf_gamma)
+                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                    args.cbf_gamma, args.cbf_alpha)
             else:
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,

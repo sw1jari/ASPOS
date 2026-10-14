@@ -45,6 +45,9 @@ def main(args):
     print(hyperparams)
     if not os.path.exists("logs_ppo"):
         os.makedirs("logs_ppo")
+    
+    if not args.cbf_alpha:
+        args.cbf_alpha = 0.1
 
     file = open(f'runs/{name}/log.txt', "w+")
     os.makedirs(f'runs/{name}/videos')
@@ -220,7 +223,8 @@ def main(args):
             if not args.wp:
                 shield = CBFPolicy(
                     env_model, new_obs_space, env.observation_space,
-                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform, args.cbf_gamma)
+                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                    args.cbf_gamma, args.cbf_alpha)
             else:
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
