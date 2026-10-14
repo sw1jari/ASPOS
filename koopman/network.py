@@ -207,7 +207,9 @@ class KoopmanLightning(pl.LightningModule):
         
         reencoded_latents = self.embedding_net(decoded_states.reshape(B * H, -1)).reshape(B, H, -1)
         consistency_loss = self.criterion(reencoded_latents[:,:,S_dim:], pred_latents[:,:,S_dim:])
-        # consistency_loss = torch.tensor(0.0, device=self.device)
+        if self.hparams.embed_dim == 0:
+            # No lifted features, so the MSE above is over an empty slice and gives NaN
+            consistency_loss = torch.tensor(0.0, device=self.device)
         # 5. Reconstruction loss (as in original code)
         if self.hparams.embed_dim == 0:
             recon_loss = torch.tensor(0.0, device=self.device)
@@ -339,7 +341,7 @@ def fit_koopman(states, actions, next_states, koopman_model, horizon, epochs=100
     train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=512, shuffle=False)
 
-    trainer = pl.Trainer(max_epochs=epochs, accelerator="gpu", devices=1, check_val_every_n_epoch=5)
+    trainer = pl.Trainer(max_epochs=epochs, accelerator="auto", devices=1, check_val_every_n_epoch=5)
     trainer.fit(koopman_model, train_loader, val_loader)
     
     print(koopman_model.koopman_operator.get_koopman_operators(None, None))
