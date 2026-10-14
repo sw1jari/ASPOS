@@ -1,13 +1,14 @@
-gymnasium
+gymnasium[mujoco]==1.2.2
 imageio
 matplotlib
 numpy
 osqp
+pandas
 pygame
 pytorch_lightning
-safety_gymnasium
 scikit-learn
 scipy
 seaborn
+tensorboard
 torch
 torchmetrics
