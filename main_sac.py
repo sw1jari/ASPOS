@@ -18,11 +18,11 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import imageio
 import traceback
-torch.set_num_threads(1)
 
 # Setup environment
 
 def main(args):
+    torch.set_num_threads(args.threads)
     env = envs.get_env_from_name(args.env_name)
     
     random.seed(args.seed)
@@ -73,7 +73,8 @@ def main(args):
         episode_steps = 0
         done = False
         trunc = False
-        state, info = env.reset()
+        # Seed the start state RNG on the first reset only, reseeding every reset would give every episode the same start
+        state, info = env.reset(seed=args.seed if i_episode == 1 else None)
         unsafe_flag = False
         trajectory = [state]
         if True:
@@ -376,6 +377,7 @@ if __name__ == "__main__":
     parser.add_argument('--replay_size', type=int, default=1000000)
     parser.add_argument('--start_steps', type=int, default=10000)
     parser.add_argument('--cuda', action="store_true")
+    parser.add_argument('--threads', type=int, default=1, help='torch CPU threads')
     parser.add_argument('--horizon', type=int, default=20)
     parser.add_argument('--red_dim', type=int, default = 20)
     parser.add_argument('--no_safety', default=False, action='store_true')

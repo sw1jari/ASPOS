@@ -39,7 +39,9 @@ class PendulumEnv(gym.Env):
                 np.array([-0.39, -1]),
                 np.array([0.39, 1]))
 
-    def reset(self) -> np.ndarray:
+    def reset(self, seed=None) -> np.ndarray:
+        if seed is not None:
+            self.init_space.seed(seed)
         self.state = self.init_space.sample()
         self.steps = 0
         return self.state, {}
