@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 class ReplayMemory:
     def __init__(self, capacity, observation_space, action_dim, seed, horizon=1):
         np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
         self.capacity = capacity
         self.position = 0
         self.size = 0
@@ -32,7 +33,7 @@ class ReplayMemory:
     def sample(self, batch_size, get_cost=False, remove_samples=False, horizon = 1):
         # If the multi-step horizon is 1, simply sample one-step transitions
         if horizon == 1:
-            idx = np.random.choice(self.size, batch_size, replace=False)
+            idx = self.rng.choice(self.size, batch_size, replace=False)
             batch_states = self.states[idx]
             batch_actions = self.actions[idx]
             batch_rewards = self.rewards[idx]
