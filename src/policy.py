@@ -566,7 +566,8 @@ class CBFPolicy:
         # Get a single, fixed dynamics model for pre-computation
         z_init = np.zeros(self.s_dim) # Use a zero state for linearization
         a_pi_init = np.zeros(self.u_dim)
-        mat_dyn, eps = self.env.get_matrix_at_point(np.concatenate((z_init, a_pi_init)), self.s_dim)
+        # eps bounds the model error in the basis V, which is I unless adaptive or PCA error is on
+        mat_dyn, (V, eps) = self.env.get_matrix_at_point(np.concatenate((z_init, a_pi_init)), self.s_dim)
         A, B, c = mat_dyn[:, :self.s_dim], mat_dyn[:, self.s_dim:-1], mat_dyn[:, -1]
         eps_vec = np.full(self.s_dim, float(eps)) if np.isscalar(eps) else np.asarray(eps, float).reshape(-1,)
 
@@ -598,7 +599,7 @@ class CBFPolicy:
             H_trap_all = max(r_vals) if r_vals else 1
 
             # 3. Pre-compute tightening terms
-            tighten_pref = {tuple(p): np.cumsum([np.abs(p @ A_pows[ell]) @ eps_vec for ell in range(H_max)]) for p, _, _ in face_info}
+            tighten_pref = {tuple(p): np.cumsum([np.abs(p @ A_pows[ell] @ V) @ eps_vec for ell in range(H_max)]) for p, _, _ in face_info}
 
             # 4. Build global constraint matrices for this polyhedron
             G_rows, M_h_rows, v_h_rows, row_ptrs = [], [], [], [[] for _ in range(H_max)]
