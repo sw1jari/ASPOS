@@ -26,6 +26,7 @@ class PendulumEnv(gym.Env):
             np.array([[1.0, 0.0, 0.0, 0.0, 0.4]]),
             np.array([[-1.0, 0.0, 0.0, 0.0,  0.4]])
         ]
+        self.random_strength = 1
 
         self.safe_polys = [
             np.array([[-1.0, 0.0, 0.0, 0.0, -0.39],
@@ -54,6 +55,9 @@ class PendulumEnv(gym.Env):
         omega = self.state[1] + \
             dt * (g / (2 * ln) * np.sin(self.state[0]) +
                   3.0 / (m * ln ** 2) * action[0])
+
+        theta += torch.rand(1) * self.random_strength
+        omega += torch.rand(1) * self.random_strength
         self.state = np.clip(
                 np.asarray([theta, omega]),
                 self.observation_space.low,

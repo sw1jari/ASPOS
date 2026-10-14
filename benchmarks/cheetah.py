@@ -6,7 +6,7 @@ import sys
 
 class CheetahEnv(gym.Env):
     def __init__(self, state_processor=None, reduced_dim=None, safety=None):
-        self.env = gym.make("HalfCheetah-v5", render_mode="rgb_array")
+        self.env = gym.make("HalfCheetah-v4", render_mode="rgb_array")
         self.action_space = self.env.action_space
         
         self.observation_space = self.env.observation_space if state_processor is None else gym.spaces.Box(low=-1, high=1, shape=(reduced_dim,))
@@ -19,6 +19,7 @@ class CheetahEnv(gym.Env):
         self.done = False  
         self.safe_polys = []
         self.polys = []
+        self.random_strength = 1
         
         self.safety_constraints()
         self.unsafe_constraints()
@@ -73,6 +74,7 @@ class CheetahEnv(gym.Env):
     def step(self, action):
         
         state, reward, done, truncation, info = self.env.step(action)
+        state += torch.rand(1) * self.random_strength
         self.done = done or self.step_counter >= self._max_episode_steps# Store the done flag
 
         original_state = np.copy(state)
