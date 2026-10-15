@@ -342,6 +342,8 @@ def get_environment_model(
     use_pca: bool = False,
     n_clusters: Optional[int] = None,
     variance_threshold: float = 1.0,
+    val_data: Optional[tuple] = None,
+    holdout: Optional[tuple] = None,
 ) -> Tuple[KoopmanLinearModel, float, float, np.ndarray, np.ndarray]:
 
     # 1. Normalize Data
@@ -357,7 +359,10 @@ def get_environment_model(
     if koopman_model is None:
         koopman_model = KoopmanLightning(state_shape, latent_dim, actions.shape[-1], horizon)
     
-    fit_koopman(input_states_norm, actions, output_states_norm, koopman_model, horizon, epochs=epochs)
+    # Validation windows are normalised with the training stats
+    if val_data is not None:
+        val_data = ((val_data[0] - means) / stds, val_data[1], (val_data[2] - means) / stds)
+    fit_koopman(input_states_norm, actions, output_states_norm, koopman_model, horizon, epochs=epochs, val_data=val_data)
 
     linear_model = KoopmanLinearModel(
         koopman_model, original_s_dim=state_shape, adaptive_error=adaptive_error, 
@@ -391,6 +396,12 @@ def get_environment_model(
     # 5. Error Calculation (1-STEP ONLY)
     # Shape: (N, D)
     signed_residuals = true_latents_traj[:, 0, :] - pred_latents_traj[:, 0, :]
+    residual_states = input_states_norm[:, 0, :]
+    # Epsilon from one-step residuals on held out episodes, as in the RAMPS paper (Ambadkar et al., ICLR 2026), Sec. 4.2 and App. A.5.2
+    if holdout is not None:
+        hold_s, hold_a, hold_ns = holdout
+        residual_states = (hold_s - means) / stds
+        signed_residuals = koopman_model.transform((hold_ns - means) / stds) - koopman_model.get_next_state(residual_states, hold_a)
     
     # Global Bound is now a single vector (D,)
     linear_model.global_bound = np.percentile(np.abs(signed_residuals), percentile, axis=0)
@@ -400,7 +411,7 @@ def get_environment_model(
     if adaptive_error:
         print(f"\nTraining Adaptive Error Model (1-Step)...")
         with torch.no_grad():
-            input_x = torch.tensor(input_states_norm[:, 0, :], dtype=torch.float32, device=linear_model.device)
+            input_x = torch.tensor(residual_states, dtype=torch.float32, device=linear_model.device)
             z_train = koopman_model.embedding_net(input_x).cpu().numpy()
 
         if n_clusters is not None:

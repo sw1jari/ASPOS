@@ -18,6 +18,9 @@ class ReplayMemory:
         self.rewards = np.zeros(capacity, dtype=np.float32)
         self.dones = np.zeros(capacity, dtype=np.float32)
         self.costs = np.zeros(capacity, dtype=np.float32)
+        # Holdout label per episode, drawn once with its own RNG so SAC sampling is unaffected
+        self.split_rng = np.random.default_rng([seed, 1])
+        self.episode_is_holdout = []
 
     def push(self, state, action, reward, next_state, done, cost):
         self.states[self.position] = state
@@ -65,6 +68,30 @@ class ReplayMemory:
                 batch_costs = np.array([self.costs[i : i + horizon] for i in idx])
                 return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones, batch_costs
             return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones
+
+    def split_by_episode(self, horizon, holdout_frac, holdout_cap=100000):
+        """Train windows, holdout windows and holdout transitions, split by whole episodes.
+        The holdout parts are None while no episode is held out."""
+        n = self.size
+        # Episode ids from the done flags, each episode keeps the label it got first
+        episode = np.concatenate([[0], np.cumsum(self.dones[:n - 1] > 0)])
+        new = episode[-1] + 1 - len(self.episode_is_holdout)
+        self.episode_is_holdout.extend(self.split_rng.random(new) < holdout_frac)
+        holdout = np.array(self.episode_is_holdout)[episode]
+
+        # Train windows touch no holdout slot, validation windows lie entirely in holdout slots
+        starts = np.arange(n - horizon + 1)
+        count = np.concatenate([[0], np.cumsum(holdout)])
+        in_window = count[starts + horizon] - count[starts]
+        train = starts[in_window == 0][:, None] + np.arange(horizon)
+        val = starts[in_window == horizon][:, None] + np.arange(horizon)
+        # The RAMPS paper (Ambadkar et al., ICLR 2026), App. A.5.2, caps the holdout at 100k samples, we keep the most recent
+        hold = np.flatnonzero(holdout)[-holdout_cap:]
+
+        data = lambda idx: (self.states[idx], self.actions[idx], self.next_states[idx])
+        if len(hold) == 0:
+            return data(train), None, None
+        return data(train), data(val), data(hold)
 
     def _remove_indices(self, indices):
         """

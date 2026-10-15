@@ -172,10 +172,15 @@ def main(args):
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False:
         # if False:
             train_steps*=2
+            val_data = holdout = None
             try:
                 
-                states, actions, rewards, next_states, dones,  = \
-                    real_data.sample(batch_size = min(len(real_data), 500000), get_cost=False, remove_samples=False, horizon = args.horizon)
+                if args.holdout_frac > 0:
+                    # Whole episodes held out for epsilon and validation, the model trains on the rest
+                    (states, actions, next_states), val_data, holdout = real_data.split_by_episode(args.horizon, args.holdout_frac)
+                else:
+                    states, actions, rewards, next_states, dones,  = \
+                        real_data.sample(batch_size = min(len(real_data), 500000), get_cost=False, remove_samples=False, horizon = args.horizon)
                     
                 
             except Exception as e:
@@ -193,10 +198,15 @@ def main(args):
                 epochs = 200
 
             env_model, ev_score, r2_score, mean, std = get_environment_model(
-                    states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile)
+                    states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile,
+                    val_data=val_data, holdout=holdout)
             
             writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)   
             writer.add_scalar(f'loss/r2_score', r2_score, total_numsteps)
+            writer.add_scalar(f'model/eps_mean', np.mean(env_model.global_bound), total_numsteps)
+            writer.add_scalar(f'model/eps_max', np.max(env_model.global_bound), total_numsteps)
+            if holdout is not None:
+                writer.add_scalar(f'model/holdout_transitions', len(holdout[0]), total_numsteps)
             safety_box = safety.Box(np.hstack([env.safety.lower, -np.ones((env.safety.lower.shape[0], args.red_dim))]), np.hstack([env.safety.upper, np.ones((env.safety.upper.shape[0], args.red_dim))]))
 
             if args.red_dim != 0:
@@ -393,6 +403,7 @@ if __name__ == "__main__":
     parser.add_argument('--render', default=False, action='store_true')
     parser.add_argument('--cbf_gamma', default=0.7, type=float)
     parser.add_argument('--percentile', default=99, type=int)
+    parser.add_argument('--holdout_frac', default=0.2, type=float, help='Share of episodes held out for epsilon, 0.2 as in the RAMPS paper App. A.5.2, 0 runs the released code')
     parser.add_argument('--noise_dist', default='none', choices=['none', 'uniform', 'gaussian'],
                         help='Observation noise o = s + v, none keeps the env fully observable')
     parser.add_argument('--noise_alpha', type=float, default=0.0, help='uniform: v ~ U(-alpha, alpha)')

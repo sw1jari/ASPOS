@@ -328,15 +328,19 @@ class KoopmanLightning(pl.LightningModule):
         # This functionality is better handled outside the model, e.g., in the Dataset
         pass
 
-def fit_koopman(states, actions, next_states, koopman_model, horizon, epochs=100, val_size=0.3):
+def fit_koopman(states, actions, next_states, koopman_model, horizon, epochs=100, val_size=0.3, val_data=None):
     """
     Fit the Koopman model on multi-step trajectory data.
     """
     dataset = KoopmanDataset(states, actions, next_states)
-    total_size = len(dataset)
-    val_len = int(total_size * val_size)
-    train_len = total_size - val_len
-    train_dataset, val_dataset = random_split(dataset, [train_len, val_len])
+    if val_data is not None:
+        # Held out episodes are the validation set, the model trains on all of dataset
+        train_dataset, val_dataset = dataset, KoopmanDataset(*val_data)
+    else:
+        total_size = len(dataset)
+        val_len = int(total_size * val_size)
+        train_len = total_size - val_len
+        train_dataset, val_dataset = random_split(dataset, [train_len, val_len])
 
     train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=512, shuffle=False)
