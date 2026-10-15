@@ -20,7 +20,6 @@ from sklearn.metrics import explained_variance_score, r2_score
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors 
-import matplotlib.pyplot as plt
 # Assuming KoopmanLightning and fit_koopman are defined in koopman.network
 from koopman.network import KoopmanLightning, fit_koopman 
 
@@ -432,73 +431,5 @@ def get_environment_model(
             )
 
         print("Adaptive Error Model trained successfully.")
-
-    # 7. DIAGNOSTIC PLOTTING (1-Step Only)
-    try:
-        dataset_size = input_states.shape[0]
-        state_shape = input_states.shape[-1]
-        
-        # We only plot the single step (h=0) data
-        step_res = signed_residuals 
-        step_bound = linear_model.global_bound 
-
-        plt.figure(figsize=(10, 6))
-        plt.boxplot(step_res)
-        
-        # Overlay Global Bound
-        feature_indices = np.arange(1, step_res.shape[1] + 1)
-        plt.plot(feature_indices, step_bound, 'r*', label=f'{percentile}th % Bound', markersize=10)
-        plt.plot(feature_indices, -step_bound, 'r*', markersize=10)
-
-        # CHECK CLUSTER CENTERS (Max Abs Signed Residual)
-        if adaptive_error and linear_model.kmeans_model is not None:
-            print("\n--- Checking Cluster Center Errors (Max Abs Signed) ---")
-            kmeans = linear_model.kmeans_model
-            z_train = linear_model.stored_z
-            residuals = linear_model.stored_residuals # 1-step residuals
-            labels = kmeans.labels_
-            centers = kmeans.cluster_centers_
-            
-            # Center residuals will store the worst-case signed error for each cluster
-            center_residuals = np.zeros((len(centers), residuals.shape[1]))
-            
-            for k in range(len(centers)):
-                mask = (labels == k)
-                if np.sum(mask) == 0:
-                    continue
-                    
-                cluster_res = residuals[mask]
-                abs_cluster_res = np.abs(cluster_res)
-                max_indices = np.argmax(abs_cluster_res, axis=0)
-                
-                # Construct the worst-case signed vector
-                for d in range(residuals.shape[1]):
-                    center_residuals[k, d] = cluster_res[max_indices[d], d]
-            
-            # Check bounds on raw center errors
-            in_bound = np.abs(center_residuals) <= step_bound
-            safe_counts = np.sum(np.all(in_bound, axis=1))
-            print(f"  {safe_counts}/{len(centers)} Cluster Centers have residuals within Global Bound.")
-            
-            for f in range(state_shape):
-                x_vals = np.full(len(centers), f + 1)
-                y_vals = center_residuals[:, f]
-                if f == 0:
-                    plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4, label='Centers (Max Abs Signed)')
-                else:
-                    plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4)
-
-        plt.legend()
-        plt.title(f'Step 1 Residual Distribution (N={dataset_size})')
-        plt.xlabel('Feature Index')
-        plt.ylabel('Error')
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plot_filename = f"residual_boxplot_{dataset_size}.png"
-        plt.savefig(plot_filename)
-        plt.close()
-        print(f"Saved residual boxplot to {plot_filename}")
-
-    except Exception as e:
-        print(f"Warning: Failed to save residual boxplot: {e}")
 
     return linear_model, final_metrics['ev'], final_metrics['r2'], means, stds

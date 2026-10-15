@@ -205,6 +205,8 @@ def main(args):
             writer.add_scalar(f'loss/r2_score', r2_score, total_numsteps)
             writer.add_scalar(f'model/eps_mean', np.mean(env_model.global_bound), total_numsteps)
             writer.add_scalar(f'model/eps_max', np.max(env_model.global_bound), total_numsteps)
+            for dim, eps in enumerate(env_model.global_bound):
+                writer.add_scalar(f'model/eps/dim_{dim}', eps, total_numsteps)
             if holdout is not None:
                 writer.add_scalar(f'model/holdout_transitions', len(holdout[0]), total_numsteps)
             safety_box = safety.Box(np.hstack([env.safety.lower, -np.ones((env.safety.lower.shape[0], args.red_dim))]), np.hstack([env.safety.upper, np.ones((env.safety.upper.shape[0], args.red_dim))]))
