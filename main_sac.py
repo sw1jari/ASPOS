@@ -86,7 +86,6 @@ def main(args):
         unsafe_flag = False
         trajectory = [state]
         if True:
-
             print(i_episode, ": Real data")
             tmp_buffer = []
             real_buffer = []
@@ -101,14 +100,12 @@ def main(args):
                     action = agent(state)
                     shielded = "N"
 
-
                 next_state, reward, done, trunc, info = env.step(action)
                     
                 episode_steps += 1
                 total_numsteps += 1
                 episode_reward += reward
                 
-
                 cost = 0
                 
                 trajectory.append(next_state)
@@ -149,9 +146,7 @@ def main(args):
                         writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
                         writer.add_scalar(f'loss/alpha', alph, total_numsteps)
                 
-
                 state = next_state
-
                 
             print("Sequence", "".join(flags))
             if safe_agent is not None:
@@ -165,16 +160,11 @@ def main(args):
             
             total_real_episodes += 1 
 
-        
-        
-        
-        
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False:
         # if False:
             train_steps*=2
             val_data = holdout = None
             try:
-                
                 if args.holdout_frac > 0:
                     # Whole episodes held out for epsilon and validation, the model trains on the rest
                     (states, actions, next_states), val_data, holdout = real_data.split_by_episode(args.horizon, args.holdout_frac)
@@ -182,9 +172,7 @@ def main(args):
                     states, actions, rewards, next_states, dones,  = \
                         real_data.sample(batch_size = min(len(real_data), 500000), get_cost=False, remove_samples=False, horizon = args.horizon)
                     
-                
             except Exception as e:
-                
                 print(traceback.format_exc())
                 print("Error in sampling")
                 exit()
@@ -225,19 +213,15 @@ def main(args):
                 new_obs_space.upper[:, :-args.red_dim] = (new_obs_space.upper[:, :-args.red_dim] - mean)/(std + 1e-8)
                 
                 new_obs_space = gym.spaces.Box(low=new_obs_space.lower[0], high=new_obs_space.upper[0], shape=(args.red_dim + env.observation_space.shape[0],))
-                
-                
             else:
                 new_obs_space = gym.spaces.Box(low=np.nan_to_num(env.observation_space.low, nan=-9999, posinf=33333333, neginf=-33333333), high=np.nan_to_num(env.observation_space.high, nan=-9999, posinf=33333333, neginf=-33333333), shape=(env.observation_space.shape[0],))
                 new_obs_space.low = (new_obs_space.low - mean)/(std + 1e-8)
                 new_obs_space.high = (new_obs_space.high - mean)/(std + 1e-8)
-                
             
             polys = safety_box.to_hyperplanes(new_obs_space)
             unsafe_domains = safety_box.invert_polytope(new_obs_space)
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
-            
             
             if not args.wp:
                 shield = CBFPolicy(
@@ -252,11 +236,7 @@ def main(args):
             
             shield.update_model()
             
-
-            
-
         # Test the agent periodically
-        
         writer.add_scalar(f'reward/train', episode_reward, total_numsteps)
         print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}"
             .format(i_episode, total_numsteps,
@@ -265,9 +245,9 @@ def main(args):
         writer.add_scalar(f'agent/unsafe_real_episodes_ratio', real_unsafe_episodes/total_real_episodes, total_numsteps)
         if safe_agent is not None:
             safe_agent.reset_count()
-
         if i_episode % 10 == 0:
             print("starting testing...")
+
             avg_reward = 0.
             episodes = 1
             unsafe_episodes = 0
@@ -276,7 +256,6 @@ def main(args):
             backup_count = 0
             neural_count = 0
             t = 0
-
             for episode_num in range(episodes):
                 record_video = i_episode % 100 == 0  # Record every alternate episode (example condition)
                 custom_filename = f"runs_sac/{name}/videos/episode_{i_episode}.mp4"
@@ -291,7 +270,6 @@ def main(args):
                 trajectory = [state]
                 if args.render:
                     frames  = [env.render()]
-
                 while not done and not trunc:
                     # Decide action
                     if safe_agent is not None:
@@ -299,7 +277,6 @@ def main(args):
                     else:
                         action = agent(state)
                         shielded = None
-
 
                     next_state, reward, done, trunc, info = env.step(action)
                     episode_reward += reward
@@ -362,7 +339,6 @@ def main(args):
                     print(trajectory)    
                 # total_episodes += 1 
             
-            
         if total_numsteps > args.num_steps:
             break
         
@@ -373,7 +349,6 @@ def main(args):
     print("Total unsafe Test:", unsafe_test_episodes, "/", total_test_episodes, file=file)
     print("Using SPICE:", not args.no_safety)
     print("Using SPICE:", not args.no_safety, file=file)
-
 
     writer.add_hparams(
         hparam_dict = hyperparams, 
@@ -411,8 +386,6 @@ if __name__ == "__main__":
     parser.add_argument('--noise_alpha', type=float, default=0.0, help='uniform: v ~ U(-alpha, alpha)')
     parser.add_argument('--noise_sigma', type=float, default=0.0, help='gaussian: v ~ N(0, sigma^2)')
     parser.add_argument('--dynamics', default=None, type=str)
-
-
     parser.add_argument('--policy', default="Gaussian",
                         help='Policy Type: Gaussian | Deterministic (default: Gaussian)')
     parser.add_argument('--tau', type=float, default=0.005, metavar='G',
@@ -426,7 +399,6 @@ if __name__ == "__main__":
                         help='model updates per simulator step (default: 1)')
     parser.add_argument('--target_update_interval', type=int, default=1, metavar='N',
                         help='Value target update per no. of updates per step (default: 1)')
-    
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
 
