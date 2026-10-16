@@ -351,7 +351,7 @@ def main(args):
     avg_deviation = np.array(avg_deviation)
     plt.figure()
     plt.plot(avg_deviation)
-    plt.savefig(f"runs/{name}/deviation.png")
+    plt.savefig(f"runs_sac/{name}/deviation.png")
     plt.close()
 
     writer.add_hparams(
