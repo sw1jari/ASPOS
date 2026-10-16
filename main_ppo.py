@@ -16,10 +16,9 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import imageio
 import traceback
-# from koopman.env_model import FixedLinearModel
-from koopman.utils import parse_dynamics_from_json
 torch.set_num_threads(1)
 import time
+
 # Setup environment
 
 def main(args):
@@ -42,9 +41,7 @@ def main(args):
     name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_PPO_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.cbf_gamma}_S{args.seed}_P{args.percentile}{'_safe' if not args.no_safety else ''}_{'WP' if args.wp else 'CBF'}_{'Adaptive' if args.adaptive_error else 'Global'}"
     writer = SummaryWriter(f'runs/{name}')
 
-    print(hyperparams)
-    if not os.path.exists("logs_ppo"):
-        os.makedirs("logs_ppo")
+    if args.verbosity > 2: print(hyperparams)
 
     file = open(f'runs/{name}/log.txt', "w+")
     os.makedirs(f'runs/{name}/videos')
@@ -54,7 +51,6 @@ def main(args):
 
     # Replay memories
     real_data = ReplayMemory(args.replay_size, env.observation_space, env.action_space.shape[0], args.seed)
-
 
     iterator_loop = itertools.count(1)
 
@@ -82,7 +78,7 @@ def main(args):
         trunc = False
         state, info = env.reset()
         unsafe_flag = False
-        print(i_episode, ": Real data")
+        if args.verbosity > 1: print(i_episode, ": Real data")
 
         flags = []
         deviation = []
@@ -107,10 +103,10 @@ def main(args):
 
             if env.unsafe(next_state, False):
 
-                real_unsafe_episodes += (1 * (not unsafe_flag))
-                # episode_reward -= (100 * (not unsafe_flag))
+                real_unsafe_episodes += 1 * (not unsafe_flag)
+                # episode_reward -= 100 * (not unsafe_flag)
                 reward -= 100
-                print("UNSAFE (outside testing)", shielded)
+                if args.verbosity > 1: print("UNSAFE (outside testing)", shielded)
                 # print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
                 done = done or (True if safe_agent is not None else False)
                 cost = 1
@@ -127,7 +123,6 @@ def main(args):
                 agent.add(state, policy_action, reward, next_state, done or trunc, 0)
                 real_data.push(state, action, reward, next_state, done or trunc, 0)
 
-
             if len(agent.memory) >= args.batch_size:
                 losses = agent.train()
 
@@ -142,12 +137,13 @@ def main(args):
 
             state = next_state
 
-        print("Sequence", "".join(flags))
+        if args.verbosity > 0: print("Sequence", "".join(flags))
         if safe_agent is not None:
             try:
                 s, a, b, t = safe_agent.report()
-                print("Shield steps:", s, "  Neural steps:", a, "  Backup steps:", b)
-                print("Average time:", t / (s + a + b))
+                if args.verbosity > 1:
+                    print("Shield steps:", s, "  Neural steps:", a, "  Backup steps:", b)
+                    print("Average time:", t / (s + a + b))
                 safe_agent.reset_count()
             except Exception:
                 pass
@@ -168,7 +164,6 @@ def main(args):
 
 
             except Exception as e:
-
                 print(traceback.format_exc())
                 print("Error in sampling")
                 exit()
@@ -209,9 +204,9 @@ def main(args):
                 new_obs_space.low = (new_obs_space.low - mean)/(std + 1e-8)
                 new_obs_space.high = (new_obs_space.high - mean)/(std + 1e-8)
 
-
-            print(new_obs_space)
-            print(safety_box)
+            if args.verbosity > 2:
+                print(new_obs_space)
+                print(safety_box)
             polys = safety_box.to_hyperplanes(new_obs_space)
             unsafe_domains = safety_box.invert_polytope(new_obs_space)
             env.transformed_safe_polys = polys
@@ -232,35 +227,13 @@ def main(args):
             start_time = time.time()
             shield.update_model()
             end_time = time.time()
-            print(f"Precomputation Phase: {end_time - start_time}")
-            print(len(polys), "safe polys")
-
-        # elif args.dynamics is not None and args.no_safety is False and safe_agent is None:
-
-            # A, B, c, eps = parse_dynamics_from_json(args.dynamics)
-            # print("Loaded dynamics from", args.dynamics)
-            # env_model = FixedLinearModel(A, B, c, eps)
-            # polys = env.safety.to_hyperplanes(env.observation_space)
-            # unsafe_domains = env.safety.invert_polytope(env.observation_space)
-            # env.transformed_safe_polys = polys
-            # env.transformed_polys = unsafe_domains
-
-            # shield = CBFPolicy(
-            #     env_model, env.observation_space, env.observation_space,
-            #     env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, lambda x: x, args.cbf_gamma)
-
-            # safe_agent = Shield(shield, agent, means=np.zeros(env.observation_space.shape[0]), stds = np.ones(env.observation_space.shape[0]))
-
-            # shield.update_model()
-
-            # print(len(polys), "safe polys")
+            if args.verbosity > 0: print(f"Precomputation Phase: {end_time - start_time}")
+            if args.verbosity > 2: print(len(polys), "safe polys")
 
         # Test the agent periodically
 
         writer.add_scalar(f'reward/train', episode_reward, total_numsteps)
-        print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}"
-            .format(i_episode, total_numsteps,
-                    episode_steps, round(episode_reward, 2)))
+        if args.verbosity > 0: print(f"Episode: {i_episode}, total numsteps: {total_numsteps}, episode steps: {episode_steps}, reward: {round(episode_reward, 2)}")
 
         writer.add_scalar(f'agent/unsafe_real_episodes', real_unsafe_episodes, total_numsteps)
         writer.add_scalar(f'agent/unsafe_real_episodes_ratio', real_unsafe_episodes/total_real_episodes, total_numsteps)
@@ -268,7 +241,7 @@ def main(args):
             safe_agent.reset_count()
 
         if i_episode % 10 == 0:
-            print("starting testing...")
+            if args.verbosity > 0: print("starting testing...")
             avg_reward = 0.
             episodes = 1
             unsafe_episodes = 0
@@ -308,21 +281,23 @@ def main(args):
                     if episode_steps >= env._max_episode_steps:
                         done = True
                     if env.unsafe(next_state, False):
-                        print("UNSAFE Inside testing", shielded)
-                        # episode_reward += -100
-                        print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
+                        if args.verbosity > 2:
+                            print("UNSAFE Inside testing", shielded)
+                            # episode_reward += -100
+                            print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
                         unsafe_episodes += 1
                         done = True
 
                     if done and safe_agent is not None:
                         try:
                             s, a, b, t = safe_agent.report()
-                            print("Finished test episode:", s, "shield and", b, "backup and", a, "neural")
+                            if args.verbosity > 1: print("Finished test episode:", s, "shield and", b, "backup and", a, "neural")
+
                             shield_count += s
                             backup_count += b
                             neural_count += a
 
-                            print("Average time:", t / (s + a + b))
+                            if args.verbosity > 1: print("Average time:", t / (s + a + b))
                             safe_agent.reset_count()
                         except Exception as e:
                             print(e)
@@ -351,11 +326,12 @@ def main(args):
                 writer.add_scalar(f'agent/unsafe_test_episodes_ratio', (unsafe_test_episodes+0.0000001)/(total_test_episodes + 0.0000001), total_numsteps)
                 writer.add_scalar(f'reward/test', avg_reward, total_numsteps)
 
-                print("----------------------------------------")
-                print("Test Episodes: {}, Unsafe: {}, Avg. Length: {}, Avg. Reward: {}"
-                    .format(episodes, unsafe_episodes, round(avg_length, 2),
-                            round(avg_reward, 2)))
-                print("----------------------------------------")
+                if args.verbosity > 0:
+                    print("----------------------------------------")
+                    print("Test Episodes: {}, Unsafe: {}, Avg. Length: {}, Avg. Reward: {}"
+                        .format(episodes, unsafe_episodes, round(avg_length, 2),
+                                round(avg_reward, 2)))
+                    print("----------------------------------------")
                 # total_episodes += 1
 
 
@@ -410,11 +386,13 @@ if __name__ == "__main__":
     parser.add_argument('--red_dim', type=int, default = 20)
     parser.add_argument('--no_safety', default=False, action='store_true')
     parser.add_argument('--render', default=False, action='store_true')
-    parser.add_argument('--percentile', default=99, type=float)
+    parser.add_argument('--percentile', default=99, type=int)
     parser.add_argument('--dynamics', default=None, type=str)
+    parser.add_argument('--cbf_alpha', type=float, default=0.1)
+    parser.add_argument('--verbosity', type=int, default=0)
+
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
-    parser.add_argument('--cbf_alpha', type=float, default=0.1)
 
     args = parser.parse_args()
 

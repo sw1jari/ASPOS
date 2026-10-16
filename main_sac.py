@@ -7,9 +7,7 @@ import itertools
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from ppo import PPO, ActorCritic
 from src.policy import Shield, SACPolicy, ProjectionPolicy, CBFPolicy
-
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
@@ -19,14 +17,15 @@ import matplotlib.pyplot as plt
 import imageio
 import traceback
 torch.set_num_threads(1)
+import time
 
 # Setup environment
 
 def main(args):
-    if not hasattr(args, "cbf_alpha"):
-        args.cbf_alpha = 0.1
-
     env = envs.get_env_from_name(args.env_name, args.cbf_alpha)
+    # env.seed(args.seed)
+    # torch.manual_seed(args.seed)
+    # np.random.seed(args.seed)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -39,15 +38,14 @@ def main(args):
     if not os.path.exists("runs_sac"):
         os.makedirs("runs_sac")
 
-
     name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_SAC_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.gamma}_S{args.seed}{'_safe' if not args.no_safety else ''}"
     writer = SummaryWriter(f'runs_sac/{name}')
 
-    print(hyperparams)
+    if args.verbosity > 2: print(hyperparams)
 
     file = open(f'runs_sac/{name}/log.txt', "w+")
     os.makedirs(f'runs_sac/{name}/videos')
-    print(hyperparams)
+    # env = gym.wrappers.RecordVideo(env, f"runs_sac/{name}/videos")
 
     # SAC agent setup
 
@@ -59,9 +57,7 @@ def main(args):
     real_unsafe_episodes = 0
     total_real_episodes = 0
     total_numsteps = 0
-    # agent = PPOPolicy(env, args.batch_size, args.seed, args.batch_size, args)
     agent = SACPolicy(env, args.replay_size, args.seed, args.batch_size, args)
-
     safe_agent = None
 
     # Training loop
@@ -69,8 +65,11 @@ def main(args):
     env_model = None
     unsafe_test_episodes = 0
     total_test_episodes = 0
+    unsafe_sim_episodes = 0
+    total_sim_episodes = 0
     train_steps = 1
 
+    avg_deviation = []
     while True:
         i_episode = next(iterator_loop)
         episode_reward = 0
@@ -79,91 +78,85 @@ def main(args):
         trunc = False
         state, info = env.reset()
         unsafe_flag = False
-        trajectory = [state]
-        if True:
+        if args.verbosity > 1: print(i_episode, ": Real data")
 
-            print(i_episode, ": Real data")
-            tmp_buffer = []
-            real_buffer = []
-
-            flags = []
-
-            while not done and not trunc:
-                if safe_agent is not None:
-                    action, shielded, _, _ = safe_agent(state)
-                    flags.append(shielded[0])
-                else:
-                    action = agent(state)
-                    shielded = "N"
-
-
-                next_state, reward, done, trunc, info = env.step(action)
-
-                episode_steps += 1
-                total_numsteps += 1
-                episode_reward += reward
-
-
-                cost = 0
-
-                trajectory.append(next_state)
-
-                if env.unsafe(next_state, False):
-
-                    real_unsafe_episodes += 1 * (not unsafe_flag)
-                    # episode_reward -= 100 * (not unsafe_flag)
-                    reward -= 100
-                    print("UNSAFE (outside testing)", shielded)
-                    # print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
-                    done = done or (True if safe_agent is not None else False)
-                    cost = 1
-
-                    unsafe_flag = True
-                # Ignore the "done" signal if it comes from hitting the time
-                # horizon.
-                # github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py
-
-                if cost > 0:
-                    agent.add(state, action, reward, next_state, done or trunc, 1)
-                    real_data.push(state, action, reward, next_state, done or trunc, 1)
-                else:
-                    agent.add(state, action, reward, next_state, done or trunc, 0)
-                    real_data.push(state, action, reward, next_state, done or trunc, 0)
-
-                if len(agent.memory) > args.batch_size and total_numsteps%1 == 0:
-                    # Number of updates per step in environment
-                    for i in range(args.updates_per_step):
-                        # Update parameters of all the networks
-                        critic_1_loss, critic_2_loss, policy_loss, ent_l, alph = \
-                            agent.train()
-
-                        writer.add_scalar(f'loss/critic_1', critic_1_loss, total_numsteps)
-                        writer.add_scalar(f'loss/critic_2', critic_2_loss, total_numsteps)
-                        writer.add_scalar(f'loss/policy_loss', policy_loss, total_numsteps)
-                        writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
-                        writer.add_scalar(f'loss/alpha', alph, total_numsteps)
-
-
-                state = next_state
-
-
-            print("Sequence", "".join(flags))
+        flags = []
+        deviation = []
+        while not done and not trunc:
             if safe_agent is not None:
-                try:
-                    s, a, b, t = safe_agent.report()
+                action, shielded, dev, policy_action = safe_agent(state)
+                flags.append(shielded[0])
+                deviation.append(dev)
+            else:
+                policy_action = agent(state)
+                action = np.copy(policy_action)
+                shielded = "N"
+
+            next_state, reward, done, trunc, info = env.step(action)
+
+            episode_steps += 1
+            total_numsteps += 1
+            episode_reward += reward
+
+
+            cost = 0
+
+            if env.unsafe(next_state, False):
+
+                real_unsafe_episodes += 1 * (not unsafe_flag)
+                # episode_reward -= 100 * (not unsafe_flag)
+                reward -= 100
+                if args.verbosity > 1: print("UNSAFE (outside testing)", shielded)
+                # print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
+                done = done or (True if safe_agent is not None else False)
+                cost = 1
+
+                unsafe_flag = True
+            # Ignore the "done" signal if it comes from hitting the time
+            # horizon.
+            # github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py
+
+            if cost > 0:
+                agent.add(state, policy_action, reward, next_state, done or trunc, 1)
+                real_data.push(state, action, reward, next_state, done or trunc, 1)
+            else:
+                agent.add(state, policy_action, reward, next_state, done or trunc, 0)
+                real_data.push(state, action, reward, next_state, done or trunc, 0)
+
+            if len(agent.memory) > args.batch_size and total_numsteps%1 == 0:
+                # Number of updates per step in environment
+                for i in range(args.updates_per_step):
+                    # Update parameters of all the networks
+                    critic_1_loss, critic_2_loss, policy_loss, ent_l, alph = \
+                        agent.train()
+
+                    writer.add_scalar(f'loss/critic_1', critic_1_loss, total_numsteps)
+                    writer.add_scalar(f'loss/critic_2', critic_2_loss, total_numsteps)
+                    writer.add_scalar(f'loss/policy_loss', policy_loss, total_numsteps)
+                    writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
+                    writer.add_scalar(f'loss/alpha', alph, total_numsteps)
+
+
+            state = next_state
+
+        if args.verbosity > 0: print("Sequence", "".join(flags))
+        if safe_agent is not None:
+            try:
+                s, a, b, t = safe_agent.report()
+                if args.verbosity > 1:
                     print("Shield steps:", s, "  Neural steps:", a, "  Backup steps:", b)
                     print("Average time:", t / (s + a + b))
-                    safe_agent.reset_count()
-                except Exception:
-                    pass
+                safe_agent.reset_count()
+            except Exception:
+                pass
 
-            total_real_episodes += 1
+        total_real_episodes += 1
+        avg_deviation.append([total_numsteps, np.mean(deviation) if len(deviation) > 0 else 0])
+        writer.add_scalar(f'agent/avg_deviation', np.mean(deviation) if len(deviation) > 0 else 0, total_numsteps)
 
 
 
-
-
-        if total_numsteps >= args.start_steps * train_steps and args.no_safety is False:
+        if total_numsteps >= args.start_steps * train_steps and args.no_safety is False and args.dynamics is None:
         # if False:
             train_steps*=2
             try:
@@ -173,7 +166,6 @@ def main(args):
 
 
             except Exception as e:
-
                 print(traceback.format_exc())
                 print("Error in sampling")
                 exit()
@@ -187,7 +179,7 @@ def main(args):
                 epochs = 200
 
             env_model, ev_score, r2_score, mean, std = get_environment_model(
-                    states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile)
+                    states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile, adaptive_error=args.adaptive_error)
 
             writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)
             writer.add_scalar(f'loss/r2_score', r2_score, total_numsteps)
@@ -220,7 +212,6 @@ def main(args):
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
 
-
             if not args.wp:
                 shield = CBFPolicy(
                     env_model, new_obs_space, env.observation_space,
@@ -233,24 +224,24 @@ def main(args):
 
             safe_agent = Shield(shield, agent, mean, std)
 
+            start_time = time.time()
             shield.update_model()
-
-
-
+            end_time = time.time()
+            if args.verbosity > 0: print(f"Precomputation Phase: {end_time - start_time}")
+            if args.verbosity > 2: print(len(polys), "safe polys")
 
         # Test the agent periodically
 
         writer.add_scalar(f'reward/train', episode_reward, total_numsteps)
-        print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}"
-            .format(i_episode, total_numsteps,
-                    episode_steps, round(episode_reward, 2)))
+        if args.verbosity > 0: print(f"Episode: {i_episode}, total numsteps: {total_numsteps}, episode steps: {episode_steps}, reward: {round(episode_reward, 2)}")
+
         writer.add_scalar(f'agent/unsafe_real_episodes', real_unsafe_episodes, total_numsteps)
         writer.add_scalar(f'agent/unsafe_real_episodes_ratio', real_unsafe_episodes/total_real_episodes, total_numsteps)
         if safe_agent is not None:
             safe_agent.reset_count()
 
         if i_episode % 10 == 0:
-            print("starting testing...")
+            if args.verbosity > 0: print("starting testing...")
             avg_reward = 0.
             episodes = 1
             unsafe_episodes = 0
@@ -271,14 +262,13 @@ def main(args):
                 done = False
                 trunc = False
                 episode_steps = 0
-                trajectory = [state]
                 if args.render:
                     frames  = [env.render()]
 
                 while not done and not trunc:
                     # Decide action
                     if safe_agent is not None:
-                        action, shielded, _, _ = safe_agent(state)
+                        action, shielded, dev, _ = safe_agent(state)
                     else:
                         action = agent(state)
                         shielded = None
@@ -291,28 +281,29 @@ def main(args):
                     if episode_steps >= env._max_episode_steps:
                         done = True
                     if env.unsafe(next_state, False):
-                        print("UNSAFE Inside testing", shielded)
-                        # episode_reward += -100
-                        print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
+                        if args.verbosity > 2:
+                            print("UNSAFE Inside testing", shielded)
+                            # episode_reward += -100
+                            print(f"{np.round(state, 2)}", "\n", action, "\n", f"{np.round(next_state, 2)}")
                         unsafe_episodes += 1
                         done = True
 
                     if done and safe_agent is not None:
                         try:
                             s, a, b, t = safe_agent.report()
-                            print("Finished test episode:", s, "shield and", b, "backup and", a, "neural")
+                            if args.verbosity > 1: print("Finished test episode:", s, "shield and", b, "backup and", a, "neural")
+
                             shield_count += s
                             backup_count += b
                             neural_count += a
 
-                            print("Average time:", t / (s + a + b))
+                            if args.verbosity > 1: print("Average time:", t / (s + a + b))
                             safe_agent.reset_count()
                         except Exception as e:
                             print(e)
                             pass
 
                     state = next_state
-                    trajectory.append(state)
                     if args.render:
                         frames.append(env.render())
 
@@ -335,14 +326,12 @@ def main(args):
                 writer.add_scalar(f'agent/unsafe_test_episodes_ratio', (unsafe_test_episodes+0.0000001)/(total_test_episodes + 0.0000001), total_numsteps)
                 writer.add_scalar(f'reward/test', avg_reward, total_numsteps)
 
-                print("----------------------------------------")
-                print("Test Episodes: {}, Unsafe: {}, Avg. Length: {}, Avg. Reward: {}"
-                    .format(episodes, unsafe_episodes, round(avg_length, 2),
-                            round(avg_reward, 2)))
-                print("----------------------------------------")
-                if (i_episode - 99) % 100 == 0:
-                    print("Trajectory:")
-                    print(trajectory)
+                if args.verbosity > 0:
+                    print("----------------------------------------")
+                    print("Test Episodes: {}, Unsafe: {}, Avg. Length: {}, Avg. Reward: {}"
+                        .format(episodes, unsafe_episodes, round(avg_length, 2),
+                                round(avg_reward, 2)))
+                    print("----------------------------------------")
                 # total_episodes += 1
 
 
@@ -352,18 +341,27 @@ def main(args):
     total_episodes = next(iterator_loop) - 1
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes)
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes, file=file)
+    print("Total unsafe sim:", unsafe_sim_episodes, "/", total_sim_episodes)
+    print("Total unsafe sim:", unsafe_sim_episodes, "/", total_sim_episodes, file=file)
     print("Total unsafe Test:", unsafe_test_episodes, "/", total_test_episodes)
     print("Total unsafe Test:", unsafe_test_episodes, "/", total_test_episodes, file=file)
     print("Using SPICE:", not args.no_safety)
     print("Using SPICE:", not args.no_safety, file=file)
 
+    avg_deviation = np.array(avg_deviation)
+    plt.figure()
+    plt.plot(avg_deviation)
+    plt.savefig(f"runs/{name}/deviation.png")
+    plt.close()
 
     writer.add_hparams(
         hparam_dict = hyperparams,
         metric_dict = {
             "Unsafe Real Episodes": real_unsafe_episodes,
+            "Unsafe Sim Episodes": unsafe_sim_episodes,
             "Unsafe Test Episodes": unsafe_test_episodes,
             "Total Real Episodes": total_real_episodes,
+            "Total Sim Episodes": total_sim_episodes,
             "Total Test Episodes":total_test_episodes
         }
     )
@@ -380,16 +378,16 @@ if __name__ == "__main__":
     parser.add_argument('--hidden_size', type=int, default=256)
     parser.add_argument('--replay_size', type=int, default=1000000)
     parser.add_argument('--start_steps', type=int, default=10000)
-    parser.add_argument('--cuda', action="store_true")
-    parser.add_argument('--horizon', type=int, default=20)
+    parser.add_argument('--cuda', action="store_true", default=False)
+    parser.add_argument('--horizon', type=int, default=5)
+    parser.add_argument('--cbf_gamma', type=float, default=0.7)
     parser.add_argument('--red_dim', type=int, default = 20)
     parser.add_argument('--no_safety', default=False, action='store_true')
     parser.add_argument('--render', default=False, action='store_true')
-    parser.add_argument('--cbf_gamma', default=0.7, type=float)
     parser.add_argument('--percentile', default=99, type=int)
     parser.add_argument('--dynamics', default=None, type=str)
     parser.add_argument('--cbf_alpha', type=float, default=0.1)
-
+    parser.add_argument('--verbosity', type=int, default=0)
 
     parser.add_argument('--policy', default="Gaussian",
                         help='Policy Type: Gaussian | Deterministic (default: Gaussian)')
@@ -409,4 +407,5 @@ if __name__ == "__main__":
     parser.add_argument('--wp', default=False, action='store_true')
 
     args = parser.parse_args()
+
     main(args)
