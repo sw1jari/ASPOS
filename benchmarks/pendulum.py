@@ -54,7 +54,7 @@ class PendulumEnv(gym.Env):
         g = 9.81
         theta = self.state[0] + dt * self.state[1]
         omega = self.state[1] + \
-            dt * (g / (2 * ln) * np.sin(self.state[0])
+            dt * (g / (2 * ln) * np.sin(self.state[0]) +
                   3.0 / (m * ln ** 2) * action[0])
 
         theta += self.rng.uniform(-self.random_strength, self.random_strength, size=theta.shape)
