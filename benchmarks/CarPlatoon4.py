@@ -10,7 +10,7 @@ import numpy as np
 from gymnasium import spaces
 
 class CarPlatoonEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None):
+    def __init__(self, state_processor=None, reduced_dim=None, alpha=0):
         super(CarPlatoonEnv, self).__init__()
         self._max_episode_steps = 500
 

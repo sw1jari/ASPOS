@@ -543,7 +543,7 @@ class CBFPolicy:
         self.saved_action = None
         self.shielded = False
         self.gamma = gamma
-        self._alpha = None
+        self._alpha = alpha
 
         # --- Placeholders for the pre-computed model and solver ---
         self.precomputed = {}
@@ -611,7 +611,6 @@ class CBFPolicy:
                 )
                 for p, _, _ in face_info
             }
-            pomdp_factor = self._alpha * np.linalg.norm(p, ord=1)
 
             # 4. Build global constraint matrices for this polyhedron
             G_rows, M_h_rows, v_h_rows, row_ptrs = [], [], [], [[] for _ in range(H_max)]
@@ -624,6 +623,7 @@ class CBFPolicy:
                     G_rows.append(sp.csr_matrix(p @ phi_j))
                     M_h_rows.append(-p @ A_pows[j] + (self.gamma ** j) * p)
                     tighten = tighten_pref[tuple(p)][j - 1]
+                    pomdp_factor = self._alpha * np.linalg.norm(p, ord=1)
                     v_h_rows.append(-p @ C_list[j] - b - tighten + (self.gamma ** j) * (b - pomdp_factor) - pomdp_factor)
                     row_ptrs[j - 1].append(len(G_rows) - 1)
 

@@ -12,7 +12,7 @@ from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
 from pytorch_soft_actor_critic.replay_memory import ReplayMemory
-import gymnasium as gym 
+import gymnasium as gym
 import matplotlib.pyplot as plt
 import imageio
 import traceback
@@ -23,7 +23,7 @@ import time
 # Setup environment
 
 def main(args):
-    env = envs.get_env_from_name(args.env_name)
+    env = envs.get_env_from_name(args.env_name, args.cbf_alpha)
     # env.seed(args.seed)
     # torch.manual_seed(args.seed)
     # np.random.seed(args.seed)
@@ -38,16 +38,13 @@ def main(args):
     # Tensorboard
     if not os.path.exists("runs"):
         os.makedirs("runs")
-        
+
     name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_PPO_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.cbf_gamma}_S{args.seed}_P{args.percentile}{'_safe' if not args.no_safety else ''}_{'WP' if args.wp else 'CBF'}_{'Adaptive' if args.adaptive_error else 'Global'}"
     writer = SummaryWriter(f'runs/{name}')
 
     print(hyperparams)
     if not os.path.exists("logs_ppo"):
         os.makedirs("logs_ppo")
-    
-    if not args.cbf_alpha:
-        args.cbf_alpha = 0.1
 
     file = open(f'runs/{name}/log.txt', "w+")
     os.makedirs(f'runs/{name}/videos')
@@ -86,7 +83,7 @@ def main(args):
         state, info = env.reset()
         unsafe_flag = False
         print(i_episode, ": Real data")
-        
+
         flags = []
         deviation = []
         while not done and not trunc:
@@ -100,14 +97,14 @@ def main(args):
                 shielded = "N"
 
             next_state, reward, done, trunc, info = env.step(action)
-                
+
             episode_steps += 1
             total_numsteps += 1
             episode_reward += reward
-            
+
 
             cost = 0
-            
+
             if env.unsafe(next_state, False):
 
                 real_unsafe_episodes += (1 * (not unsafe_flag))
@@ -129,8 +126,8 @@ def main(args):
             else:
                 agent.add(state, policy_action, reward, next_state, done or trunc, 0)
                 real_data.push(state, action, reward, next_state, done or trunc, 0)
-            
-            
+
+
             if len(agent.memory) >= args.batch_size:
                 losses = agent.train()
 
@@ -144,7 +141,7 @@ def main(args):
 
 
             state = next_state
-            
+
         print("Sequence", "".join(flags))
         if safe_agent is not None:
             try:
@@ -154,28 +151,28 @@ def main(args):
                 safe_agent.reset_count()
             except Exception:
                 pass
-        
-        total_real_episodes += 1 
+
+        total_real_episodes += 1
         avg_deviation.append([total_numsteps, np.mean(deviation) if len(deviation) > 0 else 0])
         writer.add_scalar(f'agent/avg_deviation', np.mean(deviation) if len(deviation) > 0 else 0, total_numsteps)
 
-        
-        
+
+
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False and args.dynamics is None:
         # if False:
             train_steps*=2
             try:
-                
+
                 states, actions, rewards, next_states, dones,  = \
                     real_data.sample(batch_size = min(len(real_data), 500000), get_cost=False, remove_samples=False, horizon = args.horizon)
-                    
-                
+
+
             except Exception as e:
-                
+
                 print(traceback.format_exc())
                 print("Error in sampling")
                 exit()
-            
+
             if env_model is not None:
                 env_model.koopman_model.lr = 0.0003
                 koopman_model = env_model.koopman_model
@@ -186,8 +183,8 @@ def main(args):
 
             env_model, ev_score, r2_score, mean, std = get_environment_model(
                     states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile, adaptive_error=args.adaptive_error)
-            
-            writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)   
+
+            writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)
             writer.add_scalar(f'loss/r2_score', r2_score, total_numsteps)
             safety_box = safety.Box(np.hstack([env.safety.lower, -np.ones((env.safety.lower.shape[0], args.red_dim))]), np.hstack([env.safety.upper, np.ones((env.safety.upper.shape[0], args.red_dim))]))
 
@@ -200,26 +197,26 @@ def main(args):
 
             if args.red_dim != 0:
                 new_obs_space = safety.Box(np.concatenate([np.nan_to_num(env.observation_space.low, nan=-9999, posinf=33333333, neginf=-33333333), -np.ones(args.red_dim, )]), np.concatenate([np.nan_to_num(env.observation_space.high, nan=-9999, posinf=33333333, neginf=-33333333), np.ones(args.red_dim, )]))
-                
+
                 new_obs_space.lower[:, :-args.red_dim] = (new_obs_space.lower[:, :-args.red_dim] - mean)/(std + 1e-8)
                 new_obs_space.upper[:, :-args.red_dim] = (new_obs_space.upper[:, :-args.red_dim] - mean)/(std + 1e-8)
-                
+
                 new_obs_space = gym.spaces.Box(low=new_obs_space.lower[0], high=new_obs_space.upper[0], shape=(args.red_dim + env.observation_space.shape[0],))
-                
-                
+
+
             else:
                 new_obs_space = gym.spaces.Box(low=np.nan_to_num(env.observation_space.low, nan=-9999, posinf=33333333, neginf=-33333333), high=np.nan_to_num(env.observation_space.high, nan=-9999, posinf=33333333, neginf=-33333333), shape=(env.observation_space.shape[0],))
                 new_obs_space.low = (new_obs_space.low - mean)/(std + 1e-8)
                 new_obs_space.high = (new_obs_space.high - mean)/(std + 1e-8)
-                
-            
+
+
             print(new_obs_space)
             print(safety_box)
             polys = safety_box.to_hyperplanes(new_obs_space)
             unsafe_domains = safety_box.invert_polytope(new_obs_space)
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
-            
+
             if not args.wp:
                 shield = CBFPolicy(
                     env_model, new_obs_space, env.observation_space,
@@ -229,42 +226,42 @@ def main(args):
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
                     env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform)
-            
+
             safe_agent = Shield(shield, agent, mean, std)
-            
+
             start_time = time.time()
             shield.update_model()
             end_time = time.time()
             print(f"Precomputation Phase: {end_time - start_time}")
             print(len(polys), "safe polys")
-        
+
         # elif args.dynamics is not None and args.no_safety is False and safe_agent is None:
-            
+
             # A, B, c, eps = parse_dynamics_from_json(args.dynamics)
             # print("Loaded dynamics from", args.dynamics)
             # env_model = FixedLinearModel(A, B, c, eps)
             # polys = env.safety.to_hyperplanes(env.observation_space)
             # unsafe_domains = env.safety.invert_polytope(env.observation_space)
             # env.transformed_safe_polys = polys
-            # env.transformed_polys = unsafe_domains  
-            
+            # env.transformed_polys = unsafe_domains
+
             # shield = CBFPolicy(
             #     env_model, env.observation_space, env.observation_space,
             #     env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, lambda x: x, args.cbf_gamma)
-            
+
             # safe_agent = Shield(shield, agent, means=np.zeros(env.observation_space.shape[0]), stds = np.ones(env.observation_space.shape[0]))
-            
+
             # shield.update_model()
-            
+
             # print(len(polys), "safe polys")
-        
+
         # Test the agent periodically
-        
+
         writer.add_scalar(f'reward/train', episode_reward, total_numsteps)
         print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}"
             .format(i_episode, total_numsteps,
                     episode_steps, round(episode_reward, 2)))
-        
+
         writer.add_scalar(f'agent/unsafe_real_episodes', real_unsafe_episodes, total_numsteps)
         writer.add_scalar(f'agent/unsafe_real_episodes_ratio', real_unsafe_episodes/total_real_episodes, total_numsteps)
         if safe_agent is not None:
@@ -286,7 +283,7 @@ def main(args):
                 custom_filename = f"runs/{name}/videos/episode_{i_episode}.mp4"
 
                 # video_env.video_recorder.file_prefix = os.path.join("videos/", f"{custom_filename.split('.')[0]}")
-                
+
                 state, info = env.reset()
                 episode_reward = 0
                 done = False
@@ -359,12 +356,12 @@ def main(args):
                     .format(episodes, unsafe_episodes, round(avg_length, 2),
                             round(avg_reward, 2)))
                 print("----------------------------------------")
-                # total_episodes += 1 
-            
-            
+                # total_episodes += 1
+
+
         if total_numsteps > args.num_steps:
             break
-        
+
     total_episodes = next(iterator_loop) - 1
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes)
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes, file=file)
@@ -374,7 +371,7 @@ def main(args):
     print("Total unsafe Test:", unsafe_test_episodes, "/", total_test_episodes, file=file)
     print("Using SPICE:", not args.no_safety)
     print("Using SPICE:", not args.no_safety, file=file)
-    
+
     avg_deviation = np.array(avg_deviation)
     plt.figure()
     plt.plot(avg_deviation)
@@ -382,20 +379,20 @@ def main(args):
     plt.close()
 
     writer.add_hparams(
-        hparam_dict = hyperparams, 
+        hparam_dict = hyperparams,
         metric_dict = {
-            "Unsafe Real Episodes": real_unsafe_episodes, 
-            "Unsafe Sim Episodes": unsafe_sim_episodes, 
+            "Unsafe Real Episodes": real_unsafe_episodes,
+            "Unsafe Sim Episodes": unsafe_sim_episodes,
             "Unsafe Test Episodes": unsafe_test_episodes,
-            "Total Real Episodes": total_real_episodes, 
-            "Total Sim Episodes": total_sim_episodes, 
+            "Total Real Episodes": total_real_episodes,
+            "Total Sim Episodes": total_sim_episodes,
             "Total Test Episodes":total_test_episodes
         }
     )
-    
+
 if __name__ == "__main__":
-    
-    
+
+
     parser = argparse.ArgumentParser(description='Safe PPO Args')
     parser.add_argument('--env_name', default="lunar_lander")
     parser.add_argument('--gamma', type=float, default=0.995)
@@ -417,7 +414,8 @@ if __name__ == "__main__":
     parser.add_argument('--dynamics', default=None, type=str)
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
+    parser.add_argument('--cbf_alpha', type=float, default=0.1)
 
     args = parser.parse_args()
-    
+
     main(args)

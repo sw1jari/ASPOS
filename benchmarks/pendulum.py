@@ -5,7 +5,7 @@ from constraints import safety
 
 class PendulumEnv(gym.Env):
 
-    def __init__(self):
+    def __init__(self, alpha=0):
         super(PendulumEnv, self).__init__()
 
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(1,))
@@ -26,7 +26,8 @@ class PendulumEnv(gym.Env):
             np.array([[1.0, 0.0, 0.0, 0.0, 0.4]]),
             np.array([[-1.0, 0.0, 0.0, 0.0,  0.4]])
         ]
-        self.random_strength = 1
+        self.random_strength = alpha
+        self.rng = np.random.default_rng()
 
         self.safe_polys = [
             np.array([[-1.0, 0.0, 0.0, 0.0, -0.39],
@@ -35,7 +36,7 @@ class PendulumEnv(gym.Env):
         self.safety = safety.Box(
                 np.array([-0.39, -1]),
                 np.array([0.39, 1]))
-        
+
         self.original_safety = safety.Box(
                 np.array([-0.39, -1]),
                 np.array([0.39, 1]))
@@ -53,11 +54,11 @@ class PendulumEnv(gym.Env):
         g = 9.81
         theta = self.state[0] + dt * self.state[1]
         omega = self.state[1] + \
-            dt * (g / (2 * ln) * np.sin(self.state[0]) +
+            dt * (g / (2 * ln) * np.sin(self.state[0])
                   3.0 / (m * ln ** 2) * action[0])
 
-        theta += torch.rand(1) * self.random_strength
-        omega += torch.rand(1) * self.random_strength
+        theta += self.rng.uniform(-self.random_strength, self.random_strength, size=theta.shape)
+        omega += self.rng.uniform(-self.random_strength, self.random_strength, size=omega.shape)
         self.state = np.clip(
                 np.asarray([theta, omega]),
                 self.observation_space.low,
@@ -75,6 +76,7 @@ class PendulumEnv(gym.Env):
         self.action_space.seed(seed)
         self.observation_space.seed(seed)
         self.init_space.seed(seed)
+        self.rng = np.random.default_rng(seed)
 
     def unsafe(self, state: np.ndarray, sim = None) -> bool:
         return abs(self.state[0]) >= 0.4

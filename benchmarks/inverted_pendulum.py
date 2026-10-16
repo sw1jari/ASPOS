@@ -4,7 +4,7 @@ import numpy as np
 from constraints import safety
 
 class InvertedPendulumEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None, alpha=0):
         self.env = gym.make("InvertedPendulum-v5")
 
 

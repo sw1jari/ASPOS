@@ -14,7 +14,7 @@ from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
 from pytorch_soft_actor_critic.replay_memory import ReplayMemory
-import gymnasium as gym 
+import gymnasium as gym
 import matplotlib.pyplot as plt
 import imageio
 import traceback
@@ -23,8 +23,11 @@ torch.set_num_threads(1)
 # Setup environment
 
 def main(args):
-    env = envs.get_env_from_name(args.env_name)
-    
+    if not hasattr(args, "cbf_alpha"):
+        args.cbf_alpha = 0.1
+
+    env = envs.get_env_from_name(args.env_name, args.cbf_alpha)
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -35,10 +38,8 @@ def main(args):
     # Tensorboard
     if not os.path.exists("runs_sac"):
         os.makedirs("runs_sac")
-        
-    if not args.cbf_alpha:
-        args.cbf_alpha = 0.1
-    
+
+
     name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_SAC_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.gamma}_S{args.seed}{'_safe' if not args.no_safety else ''}"
     writer = SummaryWriter(f'runs_sac/{name}')
 
@@ -84,9 +85,9 @@ def main(args):
             print(i_episode, ": Real data")
             tmp_buffer = []
             real_buffer = []
-            
+
             flags = []
-            
+
             while not done and not trunc:
                 if safe_agent is not None:
                     action, shielded, _, _ = safe_agent(state)
@@ -97,16 +98,16 @@ def main(args):
 
 
                 next_state, reward, done, trunc, info = env.step(action)
-                    
+
                 episode_steps += 1
                 total_numsteps += 1
                 episode_reward += reward
-                
+
 
                 cost = 0
-                
+
                 trajectory.append(next_state)
-                
+
                 if env.unsafe(next_state, False):
 
                     real_unsafe_episodes += 1 * (not unsafe_flag)
@@ -128,7 +129,7 @@ def main(args):
                 else:
                     agent.add(state, action, reward, next_state, done or trunc, 0)
                     real_data.push(state, action, reward, next_state, done or trunc, 0)
-                
+
                 if len(agent.memory) > args.batch_size and total_numsteps%1 == 0:
                     # Number of updates per step in environment
                     for i in range(args.updates_per_step):
@@ -141,11 +142,11 @@ def main(args):
                         writer.add_scalar(f'loss/policy_loss', policy_loss, total_numsteps)
                         writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
                         writer.add_scalar(f'loss/alpha', alph, total_numsteps)
-                
+
 
                 state = next_state
 
-                
+
             print("Sequence", "".join(flags))
             if safe_agent is not None:
                 try:
@@ -155,28 +156,28 @@ def main(args):
                     safe_agent.reset_count()
                 except Exception:
                     pass
-            
-            total_real_episodes += 1 
 
-        
-        
-        
-        
+            total_real_episodes += 1
+
+
+
+
+
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False:
         # if False:
             train_steps*=2
             try:
-                
+
                 states, actions, rewards, next_states, dones,  = \
                     real_data.sample(batch_size = min(len(real_data), 500000), get_cost=False, remove_samples=False, horizon = args.horizon)
-                    
-                
+
+
             except Exception as e:
-                
+
                 print(traceback.format_exc())
                 print("Error in sampling")
                 exit()
-            
+
             if env_model is not None:
                 env_model.koopman_model.lr = 0.0003
                 koopman_model = env_model.koopman_model
@@ -187,8 +188,8 @@ def main(args):
 
             env_model, ev_score, r2_score, mean, std = get_environment_model(
                     states, actions, next_states, koopman_model = koopman_model, latent_dim=args.red_dim, horizon = args.horizon, epochs= epochs, percentile=args.percentile)
-            
-            writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)   
+
+            writer.add_scalar(f'loss/ev_koopman', ev_score, total_numsteps)
             writer.add_scalar(f'loss/r2_score', r2_score, total_numsteps)
             safety_box = safety.Box(np.hstack([env.safety.lower, -np.ones((env.safety.lower.shape[0], args.red_dim))]), np.hstack([env.safety.upper, np.ones((env.safety.upper.shape[0], args.red_dim))]))
 
@@ -201,25 +202,25 @@ def main(args):
 
             if args.red_dim != 0:
                 new_obs_space = safety.Box(np.concatenate([np.nan_to_num(env.observation_space.low, nan=-9999, posinf=33333333, neginf=-33333333), -np.ones(args.red_dim, )]), np.concatenate([np.nan_to_num(env.observation_space.high, nan=-9999, posinf=33333333, neginf=-33333333), np.ones(args.red_dim, )]))
-                
+
                 new_obs_space.lower[:, :-args.red_dim] = (new_obs_space.lower[:, :-args.red_dim] - mean)/(std + 1e-8)
                 new_obs_space.upper[:, :-args.red_dim] = (new_obs_space.upper[:, :-args.red_dim] - mean)/(std + 1e-8)
-                
+
                 new_obs_space = gym.spaces.Box(low=new_obs_space.lower[0], high=new_obs_space.upper[0], shape=(args.red_dim + env.observation_space.shape[0],))
-                
-                
+
+
             else:
                 new_obs_space = gym.spaces.Box(low=np.nan_to_num(env.observation_space.low, nan=-9999, posinf=33333333, neginf=-33333333), high=np.nan_to_num(env.observation_space.high, nan=-9999, posinf=33333333, neginf=-33333333), shape=(env.observation_space.shape[0],))
                 new_obs_space.low = (new_obs_space.low - mean)/(std + 1e-8)
                 new_obs_space.high = (new_obs_space.high - mean)/(std + 1e-8)
-                
-            
+
+
             polys = safety_box.to_hyperplanes(new_obs_space)
             unsafe_domains = safety_box.invert_polytope(new_obs_space)
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
-            
-            
+
+
             if not args.wp:
                 shield = CBFPolicy(
                     env_model, new_obs_space, env.observation_space,
@@ -229,16 +230,16 @@ def main(args):
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
                     env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform)
-            
-            safe_agent = Shield(shield, agent, mean, std)
-            
-            shield.update_model()
-            
 
-            
+            safe_agent = Shield(shield, agent, mean, std)
+
+            shield.update_model()
+
+
+
 
         # Test the agent periodically
-        
+
         writer.add_scalar(f'reward/train', episode_reward, total_numsteps)
         print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}"
             .format(i_episode, total_numsteps,
@@ -264,7 +265,7 @@ def main(args):
                 custom_filename = f"runs_sac/{name}/videos/episode_{i_episode}.mp4"
 
                 # video_env.video_recorder.file_prefix = os.path.join("videos/", f"{custom_filename.split('.')[0]}")
-                
+
                 state, info = env.reset()
                 episode_reward = 0
                 done = False
@@ -341,13 +342,13 @@ def main(args):
                 print("----------------------------------------")
                 if (i_episode - 99) % 100 == 0:
                     print("Trajectory:")
-                    print(trajectory)    
-                # total_episodes += 1 
-            
-            
+                    print(trajectory)
+                # total_episodes += 1
+
+
         if total_numsteps > args.num_steps:
             break
-        
+
     total_episodes = next(iterator_loop) - 1
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes)
     print("Total unsafe real:", real_unsafe_episodes, "/", total_real_episodes, file=file)
@@ -358,15 +359,15 @@ def main(args):
 
 
     writer.add_hparams(
-        hparam_dict = hyperparams, 
+        hparam_dict = hyperparams,
         metric_dict = {
-            "Unsafe Real Episodes": real_unsafe_episodes, 
+            "Unsafe Real Episodes": real_unsafe_episodes,
             "Unsafe Test Episodes": unsafe_test_episodes,
-            "Total Real Episodes": total_real_episodes, 
+            "Total Real Episodes": total_real_episodes,
             "Total Test Episodes":total_test_episodes
         }
     )
-    
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Safe SAC Args')
@@ -387,6 +388,7 @@ if __name__ == "__main__":
     parser.add_argument('--cbf_gamma', default=0.7, type=float)
     parser.add_argument('--percentile', default=99, type=int)
     parser.add_argument('--dynamics', default=None, type=str)
+    parser.add_argument('--cbf_alpha', type=float, default=0.1)
 
 
     parser.add_argument('--policy', default="Gaussian",
@@ -402,7 +404,7 @@ if __name__ == "__main__":
                         help='model updates per simulator step (default: 1)')
     parser.add_argument('--target_update_interval', type=int, default=1, metavar='N',
                         help='Value target update per no. of updates per step (default: 1)')
-    
+
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
 
