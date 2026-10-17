@@ -78,7 +78,8 @@ def main(args):
         episode_steps = 0
         done = False
         trunc = False
-        state, info = env.reset()
+        # Seed first reset for reproducibility
+        state, info = env.reset(seed=args.seed if i_episode == 1 else None)
         unsafe_flag = False
         if args.verbosity > 1: print(i_episode, ": Real data")
 
