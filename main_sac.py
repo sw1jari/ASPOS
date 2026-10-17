@@ -23,13 +23,11 @@ import time
 
 def main(args):
     env = envs.get_env_from_name(args.env_name, args.cbf_alpha)
-    # env.seed(args.seed)
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    env.rng = np.random.default_rng(args.seed)
     torch.backends.cudnn.deterministic = True
 
     hyperparams = vars(args)
@@ -76,7 +74,8 @@ def main(args):
         episode_steps = 0
         done = False
         trunc = False
-        state, info = env.reset()
+        # Seed first reset for reproducibility
+        state, info = env.reset(seed=args.seed if i_episode == 1 else None)
         unsafe_flag = False
         if args.verbosity > 1: print(i_episode, ": Real data")
 
