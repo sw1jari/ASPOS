@@ -5,7 +5,7 @@ from constraints import safety
 import sys
 
 class LunarLanderEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None, alpha=0):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
         self.env = gym.make("LunarLander-v3", continuous=True, render_mode = "rgb_array")
         self.action_space = self.env.action_space
         self.original_observation_space = self.env.observation_space

@@ -5,7 +5,7 @@ from constraints import safety
 import sys
 
 class CheetahEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None, alpha=0):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
         self.env = gym.make("HalfCheetah-v4", render_mode="rgb_array")
         self.action_space = self.env.action_space
 
@@ -19,8 +19,6 @@ class CheetahEnv(gym.Env):
         self.done = False
         self.safe_polys = []
         self.polys = []
-        self.random_strength = alpha
-        self.rng = np.random.default_rng()
 
         self.safety_constraints()
         self.unsafe_constraints()
@@ -75,7 +73,6 @@ class CheetahEnv(gym.Env):
     def step(self, action):
 
         state, reward, done, truncation, info = self.env.step(action)
-        state += self.rng.uniform(-self.random_strength, self.random_strength, size=state.shape)
         self.done = done or self.step_counter >= self._max_episode_steps# Store the done flag
 
         original_state = np.copy(state)
@@ -120,7 +117,6 @@ class CheetahEnv(gym.Env):
             np.random.seed(seed)
             self.env.action_space.seed(seed)
             self.env.observation_space.seed(seed)
-            self.rng = np.random.default_rng(seed)
 
     def predict_done(self, state: np.ndarray) -> bool:
         return self.done

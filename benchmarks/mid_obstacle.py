@@ -5,7 +5,7 @@ from typing import Tuple, Dict, Any
 
 class MidObstacleEnv(gym.Env):
 
-    def __init__(self, alpha=0):
+    def __init__(self):
         super().__init__()
 
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(2,))

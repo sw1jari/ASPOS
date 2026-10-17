@@ -11,6 +11,7 @@ from src.policy import Shield, PPOPolicy, ProjectionPolicy, CBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
+from benchmarks.noisy_obs import NoisyObservationWrapper
 from pytorch_soft_actor_critic.replay_memory import ReplayMemory
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -22,7 +23,8 @@ import time
 # Setup environment
 
 def main(args):
-    env = envs.get_env_from_name(args.env_name, args.cbf_alpha)
+    env = envs.get_env_from_name(args.env_name)
+    env = NoisyObservationWrapper(env, args.noise, args.seed)
     # env.seed(args.seed)
     # torch.manual_seed(args.seed)
     # np.random.seed(args.seed)
@@ -38,7 +40,7 @@ def main(args):
     if not os.path.exists("runs"):
         os.makedirs("runs")
 
-    name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_PPO_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.cbf_gamma}_S{args.seed}_P{args.percentile}{'_safe' if not args.no_safety else ''}_{'WP' if args.wp else 'CBF'}_{'Adaptive' if args.adaptive_error else 'Global'}"
+    name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_PPO_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.cbf_gamma}_S{args.seed}_N{args.noise}_A{args.cbf_alpha}_P{args.percentile}{'_safe' if not args.no_safety else ''}_{'WP' if args.wp else 'CBF'}_{'Adaptive' if args.adaptive_error else 'Global'}"
     writer = SummaryWriter(f'runs/{name}')
 
     if args.verbosity > 2: print(hyperparams)
@@ -101,7 +103,7 @@ def main(args):
 
             cost = 0
 
-            if env.unsafe(next_state, False):
+            if env.unsafe(info['true_state'], False):
 
                 real_unsafe_episodes += 1 * (not unsafe_flag)
                 # episode_reward -= 100 * (not unsafe_flag)
@@ -280,7 +282,7 @@ def main(args):
 
                     if episode_steps >= env._max_episode_steps:
                         done = True
-                    if env.unsafe(next_state, False):
+                    if env.unsafe(info['true_state'], False):
                         if args.verbosity > 2:
                             print("UNSAFE Inside testing", shielded)
                             # episode_reward += -100
@@ -389,6 +391,7 @@ if __name__ == "__main__":
     parser.add_argument('--percentile', default=99, type=int)
     parser.add_argument('--dynamics', default=None, type=str)
     parser.add_argument('--cbf_alpha', type=float, default=0.1)
+    parser.add_argument('--noise', type=float, default=0.0)
     parser.add_argument('--verbosity', type=int, default=0)
 
     parser.add_argument('--adaptive_error', default=False, action='store_true')

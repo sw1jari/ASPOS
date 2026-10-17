@@ -24,7 +24,7 @@ class AccEnv(gym.Env):
     """
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 50}
 
-    def __init__(self, render_mode: Optional[str] = None, alpha=0):
+    def __init__(self, render_mode: Optional[str] = None):
         super(AccEnv, self).__init__()
 
         self.action_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(1,), dtype=np.float32)

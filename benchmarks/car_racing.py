@@ -21,7 +21,7 @@ class CarRacingEnv(gym.Env):
     """
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 50}
 
-    def __init__(self, render_mode: Optional[str] = None, alpha=0):
+    def __init__(self, render_mode: Optional[str] = None):
         super().__init__()
 
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)

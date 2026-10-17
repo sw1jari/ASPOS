@@ -6,7 +6,7 @@ import sys
 from benchmarks.utils import *
 
 class BipedalWalkerEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None, alpha=0):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
         self.env = gym.make("BipedalWalker-v3", render_mode = "rgb_array")
         self.action_space = self.env.action_space
         

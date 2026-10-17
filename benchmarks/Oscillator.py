@@ -10,7 +10,7 @@ import gymnasium as gym
 import numpy as np
 
 class OscillatorEnv(gym.Env):
-    def __init__(self, max_episode_steps=500, alpha=0):
+    def __init__(self, max_episode_steps=500):
         self.ds = 18
         self.us = 2
         self.h = 0.01

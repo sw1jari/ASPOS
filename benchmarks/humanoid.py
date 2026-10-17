@@ -5,7 +5,7 @@ from constraints import safety
 import sys
 from gymnasium.wrappers import NormalizeObservation
 class HumanoidEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None, alpha=0):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
         self.env = gym.make("Humanoid-v4", render_mode="rgb_array")
         self.action_space = self.env.action_space
         

@@ -1,70 +1,70 @@
-def get_env_from_name(name, alpha=0):
+def get_env_from_name(name):
 
     if name == 'acc':
         from .acc import AccEnv
-        return AccEnv(alpha=alpha)
+        return AccEnv()
     if name == 'car_racing':
         from .car_racing import CarRacingEnv
-        return CarRacingEnv(alpha=alpha)
+        return CarRacingEnv()
     if name == 'mid_obstacle':
         from .mid_obstacle import MidObstacleEnv
-        return MidObstacleEnv(alpha=alpha)
+        return MidObstacleEnv()
     if name == 'mountain_car':
         from .mountain_car import MountainCarEnv
-        return MountainCarEnv(alpha=alpha)
+        return MountainCarEnv()
     if name == 'noisy_road':
         from .noisy_road import NoisyRoadEnv
-        return NoisyRoadEnv(alpha=alpha)
+        return NoisyRoadEnv()
     if name == 'noisy_road_2d':
         from .noisy_road_2d import NoisyRoad2dEnv
-        return NoisyRoad2dEnv(alpha=alpha)
+        return NoisyRoad2dEnv()
     if name == 'obstacle':
         from .obstacle import ObstacleEnv
-        return ObstacleEnv(alpha=alpha)
+        return ObstacleEnv()
     if name == 'pendulum':
         from .pendulum import PendulumEnv
-        return PendulumEnv(alpha=alpha)
+        return PendulumEnv()
     if name == 'road':
         from .road import RoadEnv
-        return RoadEnv(alpha=alpha)
+        return RoadEnv()
     if name == 'road_2d':
         from .road_2d import Road2dEnv
-        return Road2dEnv(alpha=alpha)
+        return Road2dEnv()
     if name == 'lunar_lander':
         from .lunar_lander import LunarLanderEnv
-        return LunarLanderEnv(alpha=alpha)
+        return LunarLanderEnv()
     if name == 'lunar_lander_R':
         from .lunar_lander_RedDim import LunarLanderEnv2
-        return LunarLanderEnv2(alpha=alpha)
+        return LunarLanderEnv2()
     if name == 'bipedal_walker':
         from .bipedal_walker import BipedalWalkerEnv
-        return BipedalWalkerEnv(alpha=alpha)
+        return BipedalWalkerEnv()
     if name == 'inverted_pendulum':
         from .inverted_pendulum import InvertedPendulumEnv
-        return InvertedPendulumEnv(alpha=alpha)
+        return InvertedPendulumEnv()
     if name == 'hopper':
         from .hopper import HopperEnv
-        return HopperEnv(alpha=alpha)
+        return HopperEnv()
     if name == 'walker':
         from .walker import WalkerEnv
-        return WalkerEnv(alpha=alpha)
+        return WalkerEnv()
     if name == 'cheetah':
         from .cheetah import CheetahEnv
-        return CheetahEnv(alpha=alpha)
+        return CheetahEnv()
     if name == 'safety_point':
         from .safety_gym import SafetyPointGoalEnv
-        return SafetyPointGoalEnv(alpha=alpha)
+        return SafetyPointGoalEnv()
     if name == 'carplatoon4':
         from .CarPlatoon4 import CarPlatoonEnv
-        return CarPlatoonEnv(alpha=alpha)
+        return CarPlatoonEnv()
     if name == 'Oscillator':
         from .Oscillator import OscillatorEnv
-        return OscillatorEnv(alpha=alpha)
+        return OscillatorEnv()
     if name == 'humanoid':
         from .humanoid import HumanoidEnv
-        return HumanoidEnv(alpha=alpha)
+        return HumanoidEnv()
     if name == 'ant':
         from .ant import AntEnv
-        return AntEnv(alpha=alpha)
+        return AntEnv()
     else:
         raise RuntimeError("Unkonwn environment: " + name)
