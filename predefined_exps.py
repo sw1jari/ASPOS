@@ -94,9 +94,9 @@ def run_exps():
                     if method == main_ppo:
                         config.batch_size = 2048
                     results = method(config)
-                    violations["real"].append( results["real"]["unsafe"] / results["real"]["total"] )
-                    violations["sim"].append( results["sim"]["unsafe"] / results["sim"]["total"] )
-                    violations["test"].append( results["test"]["unsafe"] / results["test"]["total"] )
+                    violations["real"].append( results["real"]["unsafe"] / (results["real"]["total"] + 1e-8) )
+                    violations["sim"].append( results["sim"]["unsafe"] / (results["sim"]["total"] + 1e-8) )
+                    violations["test"].append( results["test"]["unsafe"] / (results["test"]["total"] + 1e-8) )
                 to_write += "Total unsafe real: " + np.mean(violations["real"]) + " ±" + np.std(violations["real"] + "\n")
                 to_write += "Total unsafe sim: " + np.mean(violations["sim"]) + " ±" + np.std(violations["sim"] + "\n")
                 to_write += "Total unsafe test: " + np.mean(violations["test"]) + " ±" + np.std(violations["test"] + "\n\n\n")
