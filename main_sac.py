@@ -368,6 +368,19 @@ def main(args):
             "Total Test Episodes":total_test_episodes
         }
     )
+    return { "real": {
+        "unsafe": real_unsafe_episodes,
+        "total": total_real_episodes
+    },
+    "sim": {
+        "unsafe": unsafe_sim_episodes,
+        "total": total_sim_episodes
+    },
+    "test": {
+        "unsafe": unsafe_test_episodes,
+        "total": total_test_episodes
+    }
+    }
 
 if __name__ == "__main__":
 
