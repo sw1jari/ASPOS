@@ -90,7 +90,7 @@ def run_exps():
                     "test": []
                 }
                 for seed in seeds:
-                    config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=34)
+                    config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=0)
                     if method == main_ppo:
                         config.batch_size = 2048
                     results = method(config)
