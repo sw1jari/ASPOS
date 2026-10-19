@@ -62,7 +62,7 @@ class KoopmanLinearModel:
 
     def set_adaptive_model(self, kmeans: KMeans, z_train: np.ndarray, 
                         residuals: np.ndarray, percentile: float = 99.0,
-                        variance_threshold: float = 1.0):
+                           variance_threshold: float = 1.0, verbosity: int = 0):
         """
         Trains the adaptive error components using 1-step residuals.
         Calculates the Hybrid Error Bound: Max Observed Error + Statistical Buffer (3-sigma).
@@ -83,7 +83,7 @@ class KoopmanLinearModel:
         self.cluster_bounds = []
         self.cluster_radii = np.zeros(n_clusters)
 
-        print(f"Computing 1-Step Cluster Stats (K={n_clusters}, PCA={self.use_pca})...")
+        if verbosity > 0: print(f"Computing 1-Step Cluster Stats (K={n_clusters}, PCA={self.use_pca})...")
 
         for k in range(n_clusters):
             mask = (labels == k)
@@ -256,7 +256,8 @@ def auto_tune_clusters(
     percentile: float = 99.0,
     min_samples_per_cluster: int = 1000,
     variance_threshold: float = 1.0,
-    use_pca: bool = True
+    use_pca: bool = True,
+    verbosity: int = 0
 ) -> Tuple[KMeans, np.ndarray, List[np.ndarray], dict]:
     """
     Sweeps K and selects the optimal cluster count using the Elbow Method (Kneedle).
@@ -271,7 +272,7 @@ def auto_tune_clusters(
     if not candidates:
         candidates = [max(1, int(N / 1000))]
 
-    print(f"  Auto-tuning clusters (Elbow Method). Candidates: {candidates}")
+    if verbosity > 0: print(f"  Auto-tuning clusters (Elbow Method). Candidates: {candidates}")
     results_history = [] 
 
     for k in candidates:
@@ -301,7 +302,7 @@ def auto_tune_clusters(
         results_history.append({
             'k': k, 'score': avg_log_vol, 'kmeans': kmeans
         })
-        print(f"    K={k}: Avg Log-Vol={avg_log_vol:.4f}")
+        if verbosity > 0: print(f"    K={k}: Avg Log-Vol={avg_log_vol:.4f}")
 
     if len(results_history) < 3:
         best_result = min(results_history, key=lambda x: x['score'])
@@ -323,7 +324,7 @@ def auto_tune_clusters(
             distances.append(dist)
         best_idx = np.argmax(distances)
         best_result = results_history[best_idx]
-        print(f"  Elbow Detected at K={best_result['k']} (Score: {best_result['score']:.4f})")
+        if verbosity > 0: print(f"  Elbow Detected at K={best_result['k']} (Score: {best_result['score']:.4f})")
 
     # Return None for bounds/rotations as they are re-computed properly in set_adaptive_model
     return best_result['kmeans'], None, None, {'avg_log_vol': best_result['score']}
@@ -342,6 +343,8 @@ def get_environment_model(
     use_pca: bool = False,
     n_clusters: Optional[int] = None,
     variance_threshold: float = 1.0,
+    generate_box_plot: bool = False,
+    verbosity: int = 0
 ) -> Tuple[KoopmanLinearModel, float, float, np.ndarray, np.ndarray]:
 
     # 1. Normalize Data
@@ -365,7 +368,7 @@ def get_environment_model(
     )
 
     # 3. Generate Predictions
-    print("\n--- Generating predictions... ---")
+    if verbosity > 0: print("\n--- Generating predictions... ---")
     pred_latents_traj = linear_model.predict_trajectory(input_states_norm, actions)
 
     with torch.no_grad():
@@ -374,7 +377,7 @@ def get_environment_model(
         true_latents_traj = flat_true_z.view(*pred_latents_traj.shape).cpu().numpy()
 
     # 4. Metrics
-    print("\n--- Step-wise Model Accuracy Evaluation ---")
+    if verbosity > 0: print("\n--- Step-wise Model Accuracy Evaluation ---")
     final_metrics = {}
     eval_horizon = min(horizon, pred_latents_traj.shape[1])
     for i in range(eval_horizon):
@@ -383,7 +386,7 @@ def get_environment_model(
 
         ev_score = explained_variance_score(true_x.flatten(), pred_x.flatten())
         r2 = r2_score(true_x.flatten(), pred_x.flatten())
-        print(f"Horizon {i}: EV={ev_score:.4f}, R2={r2:.4f}")
+        if verbosity > 0: print(f"Horizon {i}: EV={ev_score:.4f}, R2={r2:.4f}")
         if i == 0:
             final_metrics['ev'] = ev_score
             final_metrics['r2'] = r2
@@ -394,17 +397,17 @@ def get_environment_model(
 
     # Global Bound is now a single vector (D,)
     linear_model.global_bound = np.percentile(np.abs(signed_residuals), percentile, axis=0)
-    print(f"\nComputed Global Error Bound: {linear_model.global_bound}...")
+    if verbosity > 0: print(f"\nComputed Global Error Bound: {linear_model.global_bound}...")
 
     # 6. TRAIN ADAPTIVE ERROR MODEL
     if adaptive_error:
-        print(f"\nTraining Adaptive Error Model (1-Step)...")
+        if verbosity > 0: print(f"\nTraining Adaptive Error Model (1-Step)...")
         with torch.no_grad():
             input_x = torch.tensor(input_states_norm[:, 0, :], dtype=torch.float32, device=linear_model.device)
             z_train = koopman_model.embedding_net(input_x).cpu().numpy()
 
         if n_clusters is not None:
-            print(f"  Manual K={n_clusters}")
+            if verbosity > 0: print(f"  Manual K={n_clusters}")
             kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10).fit(z_train)
             linear_model.set_adaptive_model(
                 kmeans, z_train, signed_residuals, 
@@ -420,74 +423,75 @@ def get_environment_model(
                 percentile=float(percentile), variance_threshold=variance_threshold
             )
 
-        print("Adaptive Error Model trained successfully.")
+        if verbosity > 0: print("Adaptive Error Model trained successfully.")
 
     # 7. DIAGNOSTIC PLOTTING (1-Step Only)
-    try:
-        dataset_size = input_states.shape[0]
-        state_shape = input_states.shape[-1]
+    if generate_box_plot:
+        try:
+            dataset_size = input_states.shape[0]
+            state_shape = input_states.shape[-1]
 
-        # We only plot the single step (h=0) data
-        step_res = signed_residuals 
-        step_bound = linear_model.global_bound 
+            # We only plot the single step (h=0) data
+            step_res = signed_residuals 
+            step_bound = linear_model.global_bound 
 
-        plt.figure(figsize=(10, 6))
-        plt.boxplot(step_res)
+            plt.figure(figsize=(10, 6))
+            plt.boxplot(step_res)
 
-        # Overlay Global Bound
-        feature_indices = np.arange(1, step_res.shape[1] + 1)
-        plt.plot(feature_indices, step_bound, 'r*', label=f'{percentile}th % Bound', markersize=10)
-        plt.plot(feature_indices, -step_bound, 'r*', markersize=10)
+            # Overlay Global Bound
+            feature_indices = np.arange(1, step_res.shape[1] + 1)
+            plt.plot(feature_indices, step_bound, 'r*', label=f'{percentile}th % Bound', markersize=10)
+            plt.plot(feature_indices, -step_bound, 'r*', markersize=10)
 
-        # CHECK CLUSTER CENTERS (Max Abs Signed Residual)
-        if adaptive_error and linear_model.kmeans_model is not None:
-            print("\n--- Checking Cluster Center Errors (Max Abs Signed) ---")
-            kmeans = linear_model.kmeans_model
-            z_train = linear_model.stored_z
-            residuals = linear_model.stored_residuals # 1-step residuals
-            labels = kmeans.labels_
-            centers = kmeans.cluster_centers_
+            # CHECK CLUSTER CENTERS (Max Abs Signed Residual)
+            if adaptive_error and linear_model.kmeans_model is not None:
+                if verbosity > 0: print("\n--- Checking Cluster Center Errors (Max Abs Signed) ---")
+                kmeans = linear_model.kmeans_model
+                z_train = linear_model.stored_z
+                residuals = linear_model.stored_residuals # 1-step residuals
+                labels = kmeans.labels_
+                centers = kmeans.cluster_centers_
 
-            # Center residuals will store the worst-case signed error for each cluster
-            center_residuals = np.zeros((len(centers), residuals.shape[1]))
+                # Center residuals will store the worst-case signed error for each cluster
+                center_residuals = np.zeros((len(centers), residuals.shape[1]))
 
-            for k in range(len(centers)):
-                mask = (labels == k)
-                if np.sum(mask) == 0:
-                    continue
+                for k in range(len(centers)):
+                    mask = (labels == k)
+                    if np.sum(mask) == 0:
+                        continue
 
-                cluster_res = residuals[mask]
-                abs_cluster_res = np.abs(cluster_res)
-                max_indices = np.argmax(abs_cluster_res, axis=0)
+                    cluster_res = residuals[mask]
+                    abs_cluster_res = np.abs(cluster_res)
+                    max_indices = np.argmax(abs_cluster_res, axis=0)
 
-                # Construct the worst-case signed vector
-                for d in range(residuals.shape[1]):
-                    center_residuals[k, d] = cluster_res[max_indices[d], d]
+                    # Construct the worst-case signed vector
+                    for d in range(residuals.shape[1]):
+                        center_residuals[k, d] = cluster_res[max_indices[d], d]
 
-            # Check bounds on raw center errors
-            in_bound = np.abs(center_residuals) <= step_bound
-            safe_counts = np.sum(np.all(in_bound, axis=1))
-            print(f"  {safe_counts}/{len(centers)} Cluster Centers have residuals within Global Bound.")
+                # Check bounds on raw center errors
+                in_bound = np.abs(center_residuals) <= step_bound
+                safe_counts = np.sum(np.all(in_bound, axis=1))
+                if verbosity > 0: print(f"  {safe_counts}/{len(centers)} Cluster Centers have residuals within Global Bound.")
 
-            for f in range(state_shape):
-                x_vals = np.full(len(centers), f + 1)
-                y_vals = center_residuals[:, f]
-                if f == 0:
-                    plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4, label='Centers (Max Abs Signed)')
-                else:
-                    plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4)
+                for f in range(state_shape):
+                    x_vals = np.full(len(centers), f + 1)
+                    y_vals = center_residuals[:, f]
+                    if f == 0:
+                        plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4, label='Centers (Max Abs Signed)')
+                    else:
+                        plt.plot(x_vals, y_vals, 'bo', alpha=0.6, markersize=4)
 
-        plt.legend()
-        plt.title(f'Step 1 Residual Distribution (N={dataset_size})')
-        plt.xlabel('Feature Index')
-        plt.ylabel('Error')
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plot_filename = f"residual_boxplot_{dataset_size}.png"
-        plt.savefig(plot_filename)
-        plt.close()
-        print(f"Saved residual boxplot to {plot_filename}")
+            plt.legend()
+            plt.title(f'Step 1 Residual Distribution (N={dataset_size})')
+            plt.xlabel('Feature Index')
+            plt.ylabel('Error')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plot_filename = f"residual_boxplot_{dataset_size}.png"
+            plt.savefig(plot_filename)
+            plt.close()
+            if verbosity > 0: print(f"Saved residual boxplot to {plot_filename}")
 
-    except Exception as e:
-        print(f"Warning: Failed to save residual boxplot: {e}")
+        except Exception as e:
+            if verbosity > 0: print(f"Warning: Failed to save residual boxplot: {e}")
 
     return linear_model, final_metrics['ev'], final_metrics['r2'], means, stds

@@ -6,7 +6,7 @@ import sys
 from benchmarks.utils import *
 
 class BipedalWalkerEnv(gym.Env):
-    def __init__(self, state_processor=None, reduced_dim=None, safety=None):
+    def __init__(self, state_processor=None, reduced_dim=None, safety=None, verbosity=0):
         self.env = gym.make("BipedalWalker-v3", render_mode = "rgb_array")
         self.action_space = self.env.action_space
         
@@ -26,7 +26,9 @@ class BipedalWalkerEnv(gym.Env):
         self.safety_constraints()
         self.unsafe_constraints()
         self.render_mode = "rgb_array"
-        
+ 
+        self.verbosity = verbosity
+ 
     def safety_constraints(self):
         # Define the observation space bounds
         obs_space_lower = self.original_observation_space.low
@@ -57,11 +59,11 @@ class BipedalWalkerEnv(gym.Env):
         #Joint Position
         lower_bounds[4] = -2
         upper_bounds[4] = 2
-        
+ 
         lower_bounds[5] = -2
         upper_bounds[5] = 2
-        
-        
+ 
+ 
         #Joint Position
         lower_bounds[6] = -2
         upper_bounds[6] = 2
@@ -99,7 +101,7 @@ class BipedalWalkerEnv(gym.Env):
         input_box_domain = safety.Box(lower_bounds, upper_bounds)
         polys = input_box_domain.to_hyperplanes(self.env.observation_space)
         
-        print("NUMBER OF SAFE POLYS", len(polys[0]))
+        if self.verbosity >= 0: print("NUMBER OF SAFE POLYS", len(polys[0]))
 
         # Set the safety constraints using the BoxDomain and the polys
         self.safety = input_box_domain
@@ -115,7 +117,7 @@ class BipedalWalkerEnv(gym.Env):
         # self.polys = self.safety.invert_polytope()
         self.polys = self.safety.invert_polytope(self.env.observation_space)
         
-        print("NUMBER OF UNSAFE POLYS", len(self.polys))
+        if self.verbosity >= 0: print("NUMBER OF UNSAFE POLYS", len(self.polys))
 
 
     def step(self, action):
@@ -185,7 +187,7 @@ class BipedalWalkerEnv(gym.Env):
                 
                 A = polys[:,:-1]
                 b = -polys[:,-1]
-                # print(A @ state.reshape(-1, 1) <= b.reshape(-1, 1))
+                # if self.verbosity >= 0: print(A @ state.reshape(-1, 1) <= b.reshape(-1, 1))
                 return not np.all(A @ state.reshape(-1, 1) <= b.reshape(-1, 1))
     
 

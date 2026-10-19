@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from src.policy import Shield, SACPolicy, ProjectionPolicy, CBFPolicy
+from src.policy_aspos import ASPOSCBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
@@ -158,7 +159,6 @@ def main(args):
         writer.add_scalar(f'agent/avg_deviation', np.mean(deviation) if len(deviation) > 0 else 0, total_numsteps)
 
 
-
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False and args.dynamics is None:
         # if False:
             train_steps*=2
@@ -216,10 +216,16 @@ def main(args):
             env.transformed_polys = unsafe_domains
 
             if not args.wp:
-                shield = CBFPolicy(
-                    env_model, new_obs_space, env.observation_space,
-                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
-                    args.cbf_gamma, args.cbf_alpha)
+                if args.aspos:
+                    shield = ASPOSCBFPolicy(
+                        env_model, new_obs_space, env.observation_space,
+                        env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                        args.cbf_gamma, args.cbf_alpha)
+                else:
+                    shield = CBFPolicy(
+                        env_model, new_obs_space, env.observation_space,
+                        env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                        args.cbf_gamma)
             else:
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
@@ -422,6 +428,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
+    parser.add_argument('--aspos', default=True, action='store_true')
 
     args = parser.parse_args()
 

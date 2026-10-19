@@ -1,6 +1,20 @@
-from main_ppo import main as main_ppo
-from main_sac import main as main_sac
+from combined_main import run_experiment
 import numpy as np
+import os
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+CPU_THROTTLE = 0.6
+THREADS_PER_WORKER = 1
+CUDA_ENABLED = True
+
+for _var in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ[_var] = str(THREADS_PER_WORKER)
 
 class ExperimentConfig():
     def __init__(
@@ -34,6 +48,8 @@ class ExperimentConfig():
         target_update_interval: int = 1,
         adaptive_error: bool = False,
         wp: bool = False,
+        aspos: bool = True,
+        ppo: bool = True,
     ):
         self.env_name = env_name
         self.gamma = gamma
@@ -66,44 +82,106 @@ class ExperimentConfig():
 
         self.adaptive_error = adaptive_error
         self.wp = wp
+        self.aspos = aspos
+        self.ppo = ppo
 
+def _run_group(job):
+    env, approach, method_name, alpha, seeds = job
+    violations = { "real": [], "sim": [], "test": [] }
+
+    for seed in seeds:
+        config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=0, ppo=(method_name=='PPO'), aspos=(approach=='ASPOS'))
+        if method_name == "PPO":
+            config.batch_size = 2048
+
+        results = run_experiment(config)
+
+        for split in violations:
+            violations[split].append( results[split]["unsafe"] / (results[split]["total"] + 1e-8) )
+        
+    summary = {
+        split: {
+            "mean": float(np.mean( split_val )),
+            "std": float(np.std( split_val ))
+        }
+        for split, split_val in violations.items()
+    }
+
+    return { "env": env, "method": method_name, "alpha": alpha, "summary": summary}
+
+def _init_worker():
+    try:
+        import torch
+
+        torch.set_num_threads(THREADS_PER_WORKER)
+        try:
+            torch.set_num_interop_threads(THREADS_PER_WORKER)
+        except RuntimeError:
+            # PyTorch may already have initialized this setting.
+            pass
+    except ImportError:
+        pass
+
+def _get_available_cpus():
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            return max(1, len(os.sched_getaffinity(0)))
+        except OSError:
+            pass
+    return max(1, os.cpu_count() or 1)
+
+def _worker_count(job_count):
+    cpus = _get_available_cpus()
+
+    workers = max(1, int(cpus * CPU_THROTTLE))
+    return min(job_count, workers)
 
 def run_exps():
-    methods = [main_ppo, main_sac]
+    approaches = ["RAMPS", "ASPOS"]
+    methods = ["PPO", "SAC"]
     envs = ["pendulum", "cheetah", "hopper", "ant"]
     seeds = [1, 3, 5, 11, 42]
     cbf_alphas = [ 0.1, 0.01, 0.001, 0.0 ]
     metrics_file = "./runs/combined_results.txt"
 
+    jobs = [
+        (env, approach, method_name, alpha, seeds)
+        for env in envs
+        for approach in approaches
+        for method_name in methods
+        for alpha in cbf_alphas
+    ]
+    workers = _worker_count(len(jobs))
+
+    context = mp.get_context("spawn")
+    indexed_results = {}
+    with ProcessPoolExecutor( max_workers = workers, mp_context = context, initializer = _init_worker ) as executor:
+        future_to_job = {
+            executor.submit(_run_group, job): (index, job)
+            for index, job in enumerate(jobs)
+        }
+        for future in as_completed(future_to_job):
+            index, job = future_to_job[future]
+            env, method_name, alpha, _ = job
+            try:
+                indexed_results[index] = future.result()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Experiment group failed: env={env}, method={method_name}, alpha={alpha}"
+                ) from exc
+
     with open(metrics_file, 'w') as f:
-        f.write("Mean + STD for experimental run\n\n" +\
+        f.write("Mean + STD for experimental run\n" +\
             "------------------------------------------------------------------------------"
             )
-
-    for env in envs:
-        for method in methods:
-            for alpha in cbf_alphas:
-                to_write = f"{env.capitalize()} {'PPO' if method == main_ppo else 'SAC'} - Noise: {alpha}\n\n\n"
-                violations = {
-                    "real": [],
-                    "sim": [],
-                    "test": []
-                }
-                for seed in seeds:
-                    config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=34)
-                    if method == main_ppo:
-                        config.batch_size = 2048
-                    results = method(config)
-                    violations["real"].append( results["real"]["unsafe"] / (results["real"]["total"] + 1e-8) )
-                    violations["sim"].append( results["sim"]["unsafe"] / (results["sim"]["total"] + 1e-8) )
-                    violations["test"].append( results["test"]["unsafe"] / (results["test"]["total"] + 1e-8) )
-                to_write += "Total unsafe real: " + np.mean(violations["real"]) + " ±" + np.std(violations["real"] + "\n")
-                to_write += "Total unsafe sim: " + np.mean(violations["sim"]) + " ±" + np.std(violations["sim"] + "\n")
-                to_write += "Total unsafe test: " + np.mean(violations["test"]) + " ±" + np.std(violations["test"] + "\n\n\n")
-                with open(metrics_file, 'a') as f:
-                    f.write(to_write)
-            
-
+        
+        for index in range(len(jobs)):
+            result = indexed_results[index]
+            f.write(f"{env.capitalize()} {'PPO' if method == main_ppo else 'SAC'} - Noise: {alpha}\n")
+            for split in ("real", "sim", "test"):
+                stats = result["summary"][split]
+                f.write( f"Total unsafe {split}: {stats['real']}  ± {stats['real']} \n")
+            f.write("\n\n")
 
 
 if __name__ == "__main__":

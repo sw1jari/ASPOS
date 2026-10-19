@@ -7,7 +7,7 @@ import itertools
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from src.policy import Shield, PPOPolicy, ProjectionPolicy, CBFPolicy
+from src.policy import Shield, PPOPolicy, SACPolicy, ProjectionPolicy, CBFPolicy, ASPOSCBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
@@ -22,12 +22,9 @@ import time
 
 # Setup environment
 
-def main(args):
+def run_experiment(args):
     env = envs.get_env_from_name(args.env_name)
     env = NoisyObservationWrapper(env, args.noise, args.seed)
-    # env.seed(args.seed)
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -40,7 +37,11 @@ def main(args):
     if not os.path.exists("runs"):
         os.makedirs("runs")
 
-    name = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_PPO_{args.env_name}_H{args.horizon}_D{args.red_dim}_G{args.cbf_gamma}_S{args.seed}_N{args.noise}_A{args.cbf_alpha}_P{args.percentile}{'_safe' if not args.no_safety else ''}_{'WP' if args.wp else 'CBF'}_{'Adaptive' if args.adaptive_error else 'Global'}"
+    # Save folder naming
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    run_params = f"H{args.horizon}_S{args.seed}_N{args.noise}"
+    safe_suffix = '_safe' if not args.no_safety else ''
+    name = f"{timestamp}_{'ASPOS' if args.aspos else 'RAMPS'}_{'PPO' if args.ppo else 'SAC'}_{args.env_name}_{run_params}{safe_suffix}"
     writer = SummaryWriter(f'runs/{name}')
 
     if args.verbosity > 2: print(hyperparams)
@@ -49,7 +50,7 @@ def main(args):
     os.makedirs(f'runs/{name}/videos')
     # env = gym.wrappers.RecordVideo(env, f"runs/{name}/videos")
 
-    # PPO agent setup
+    # Agent setup
 
     # Replay memories
     real_data = ReplayMemory(args.replay_size, env.observation_space, env.action_space.shape[0], args.seed)
@@ -59,7 +60,10 @@ def main(args):
     real_unsafe_episodes = 0
     total_real_episodes = 0
     total_numsteps = 0
-    agent = PPOPolicy(env, args.batch_size, args.seed, args.batch_size, args)
+    if args.ppo:
+        agent = PPOPolicy(env, args.batch_size, args.seed, args.batch_size, args)
+    else:
+        agent = SACPolicy(env, args.replay_size, args.seed, args.batch_size, args)
     safe_agent = None
 
     # Training loop
@@ -127,15 +131,24 @@ def main(args):
                 real_data.push(state, action, reward, next_state, done or trunc, 0)
 
             if len(agent.memory) >= args.batch_size:
-                losses = agent.train()
 
-                writer.add_scalar(f'loss/policy_loss', losses['avg_policy_loss'], total_numsteps)
-                writer.add_scalar(f'loss/value_loss', losses['avg_value_loss'], total_numsteps)
-                writer.add_scalar(f'loss/entropy_loss', losses['avg_entropy_loss'], total_numsteps)
-                writer.add_scalar(f'loss/clip_fraction', losses['avg_clip_fraction'], total_numsteps)
-                writer.add_scalar(f'loss/kl_div', losses['avg_kl_divergence'], total_numsteps)
-                writer.add_scalar(f'loss/total_loss', losses['avg_total_loss'], total_numsteps)
-                writer.add_scalar(f'loss/explained_variance', losses['avg_explained_variance'], total_numsteps)
+                losses = agent.train()
+                if args.ppo:
+                    writer.add_scalar(f'loss/policy_loss', losses['avg_policy_loss'], total_numsteps)
+                    writer.add_scalar(f'loss/value_loss', losses['avg_value_loss'], total_numsteps)
+                    writer.add_scalar(f'loss/entropy_loss', losses['avg_entropy_loss'], total_numsteps)
+                    writer.add_scalar(f'loss/clip_fraction', losses['avg_clip_fraction'], total_numsteps)
+                    writer.add_scalar(f'loss/kl_div', losses['avg_kl_divergence'], total_numsteps)
+                    writer.add_scalar(f'loss/total_loss', losses['avg_total_loss'], total_numsteps)
+                    writer.add_scalar(f'loss/explained_variance', losses['avg_explained_variance'], total_numsteps)
+                else:
+                    critic_1_loss, critic_2_loss, policy_loss, ent_l, alpha = losses
+
+                    writer.add_scalar(f'loss/critic_1', critic_1_loss, total_numsteps)
+                    writer.add_scalar(f'loss/critic_2', critic_2_loss, total_numsteps)
+                    writer.add_scalar(f'loss/policy_loss', policy_loss, total_numsteps)
+                    writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
+                    writer.add_scalar(f'loss/alpha', alph, total_numsteps)
 
 
             state = next_state
@@ -154,7 +167,6 @@ def main(args):
         total_real_episodes += 1
         avg_deviation.append([total_numsteps, np.mean(deviation) if len(deviation) > 0 else 0])
         writer.add_scalar(f'agent/avg_deviation', np.mean(deviation) if len(deviation) > 0 else 0, total_numsteps)
-
 
 
         if total_numsteps >= args.start_steps * train_steps and args.no_safety is False and args.dynamics is None:
@@ -210,16 +222,23 @@ def main(args):
             if args.verbosity > 2:
                 print(new_obs_space)
                 print(safety_box)
+
             polys = safety_box.to_hyperplanes(new_obs_space)
             unsafe_domains = safety_box.invert_polytope(new_obs_space)
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
 
             if not args.wp:
-                shield = CBFPolicy(
-                    env_model, new_obs_space, env.observation_space,
-                    env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
-                    args.cbf_gamma, args.cbf_alpha)
+                if args.aspos:
+                    shield = ASPOSCBFPolicy(
+                        env_model, new_obs_space, env.observation_space,
+                        env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                        args.cbf_gamma, args.cbf_alpha)
+                else:
+                    shield = CBFPolicy(
+                        env_model, new_obs_space, env.observation_space,
+                        env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
+                        args.cbf_gamma)
             else:
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
@@ -386,7 +405,7 @@ def main(args):
 if __name__ == "__main__":
 
 
-    parser = argparse.ArgumentParser(description='Safe PPO Args')
+    parser = argparse.ArgumentParser(description='RAMPS Args')
     parser.add_argument('--env_name', default="lunar_lander")
     parser.add_argument('--gamma', type=float, default=0.995)
     parser.add_argument('--lr', type=float, default=0.0003)
@@ -409,9 +428,25 @@ if __name__ == "__main__":
     parser.add_argument('--noise', type=float, default=0.0)
     parser.add_argument('--verbosity', type=int, default=0)
 
+    parser.add_argument('--policy', default="Gaussian",
+                        help='Policy Type: Gaussian | Deterministic (default: Gaussian)')
+    parser.add_argument('--tau', type=float, default=0.005, metavar='G',
+                        help='target smoothing coefficient (tau) (default: 0.005)')
+    parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
+                        help='Temperature parameter alpha determines the relative importance of the entropy\
+                                term against the reward (default: 0.2)')
+    parser.add_argument('--automatic_entropy_tuning', default=False, action='store_true',
+                        help='Automaically adjust alpha (default: False)')
+    parser.add_argument('--updates_per_step', type=int, default=1, metavar='N',
+                        help='model updates per simulator step (default: 1)')
+    parser.add_argument('--target_update_interval', type=int, default=1, metavar='N',
+                        help='Value target update per no. of updates per step (default: 1)')
+
     parser.add_argument('--adaptive_error', default=False, action='store_true')
     parser.add_argument('--wp', default=False, action='store_true')
+    parser.add_argument('--aspos', default=True, action='store_true')
+    parser.add_argument('--ppo', default=True, action='store_true')
 
     args = parser.parse_args()
 
-    main(args)
+    run_experiment(args)
