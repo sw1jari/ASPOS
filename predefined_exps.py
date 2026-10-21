@@ -138,7 +138,7 @@ def _worker_count(job_count):
 
 def run_exps():
     approaches = ["RAMPS", "ASPOS"]
-    methods = ["PPO", "SAC"]
+    methods = ["PPO"]
     envs = ["pendulum", "cheetah", "hopper", "ant"]
     seeds = [1, 3, 5, 11, 42]
     cbf_alphas = [ 0.1, 0.01, 0.001, 0.0 ]
@@ -162,7 +162,7 @@ def run_exps():
         }
         for future in as_completed(future_to_job):
             index, job = future_to_job[future]
-            env, method_name, alpha, _ = job
+            env, approach, method_name, alpha, _ = job
             try:
                 indexed_results[index] = future.result()
             except Exception as exc:

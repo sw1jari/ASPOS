@@ -7,7 +7,7 @@ import itertools
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from src.policy import Shield, PPOPolicy, SACPolicy, ProjectionPolicy, CBFPolicy, ASPOSCBFPolicy
+from src import Shield, PPOPolicy, SACPolicy, ProjectionPolicy, CBFPolicy, ASPOSCBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
@@ -48,7 +48,6 @@ def run_experiment(args):
 
     file = open(f'runs/{name}/log.txt', "w+")
     os.makedirs(f'runs/{name}/videos')
-    # env = gym.wrappers.RecordVideo(env, f"runs/{name}/videos")
 
     # Agent setup
 
@@ -148,7 +147,7 @@ def run_experiment(args):
                     writer.add_scalar(f'loss/critic_2', critic_2_loss, total_numsteps)
                     writer.add_scalar(f'loss/policy_loss', policy_loss, total_numsteps)
                     writer.add_scalar(f'loss/entropy_loss', ent_l, total_numsteps)
-                    writer.add_scalar(f'loss/alpha', alph, total_numsteps)
+                    writer.add_scalar(f'loss/alpha', alpha, total_numsteps)
 
 
             state = next_state
@@ -403,8 +402,6 @@ def run_experiment(args):
     }
 
 if __name__ == "__main__":
-
-
     parser = argparse.ArgumentParser(description='RAMPS Args')
     parser.add_argument('--env_name', default="lunar_lander")
     parser.add_argument('--gamma', type=float, default=0.995)
