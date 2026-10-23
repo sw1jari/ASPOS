@@ -24,14 +24,12 @@ import time
 
 def run_experiment(args):
     env = envs.get_env_from_name(args.env_name)
-    env = NoisyObservationWrapper(env, args.noise, args.seed)
+    env = NoisyObservationWrapper(env, args.noise, args.seed, args.noise_type)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
-
-    hyperparams = vars(args)
 
     # Tensorboard
     if not os.path.exists("runs"):
@@ -44,6 +42,7 @@ def run_experiment(args):
     name = f"{timestamp}_{'ASPOS' if args.aspos else 'RAMPS'}_{'PPO' if args.ppo else 'SAC'}_{args.env_name}_{run_params}{safe_suffix}"
     writer = SummaryWriter(f'runs/{name}')
 
+    hyperparams = vars(args)
     if args.verbosity > 2: print(hyperparams)
 
     file = open(f'runs/{name}/log.txt', "w+")
@@ -443,6 +442,7 @@ if __name__ == "__main__":
     parser.add_argument('--wp', default=False, action='store_true')
     parser.add_argument('--aspos', default=True, action='store_true')
     parser.add_argument('--ppo', default=True, action='store_true')
+    parser.add_argument('--noise_type', default="uniform")
 
     args = parser.parse_args()
 

@@ -50,6 +50,7 @@ class ExperimentConfig():
         wp: bool = False,
         aspos: bool = True,
         ppo: bool = True,
+        noise_type = "uniform"
     ):
         self.env_name = env_name
         self.gamma = gamma
@@ -84,13 +85,14 @@ class ExperimentConfig():
         self.wp = wp
         self.aspos = aspos
         self.ppo = ppo
+        self.noise_type = noise_type
 
 def _run_group(job):
     env, approach, method_name, alpha, seeds = job
     violations = { "real": [], "sim": [], "test": [] }
 
     for seed in seeds:
-        config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=0, ppo=(method_name=='PPO'), aspos=(approach=='ASPOS'))
+        config = ExperimentConfig(env_name=env, seed=seed, cbf_alpha=alpha, noise=alpha, red_dim=0, ppo=(method_name=='PPO'), aspos=(approach=='ASPOS'), noise_type='gaussian')
         if method_name == "PPO":
             config.batch_size = 2048
 
@@ -177,7 +179,7 @@ def run_exps():
         
         for index in range(len(jobs)):
             result = indexed_results[index]
-            f.write(f"{env.capitalize()} {'PPO' if method == main_ppo else 'SAC'} - Noise: {alpha}\n")
+            f.write(f"{env.capitalize()} {'PPO' if method == 'PPO' else 'SAC'} - Noise: {alpha}\n")
             for split in ("real", "sim", "test"):
                 stats = result["summary"][split]
                 f.write( f"Total unsafe {split}: {stats['real']}  ± {stats['real']} \n")

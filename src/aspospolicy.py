@@ -81,11 +81,9 @@ class ASPOSCBFPolicy:
 
         V, eps = adaptive_info
         V = np.asarray(V, float)
-        eps_vec = np.asarray(eps, float).reshape(
-            -1,
-        )
+        eps_vec = np.asarray(eps, float).reshape(-1,)
         if eps_vec.size == 1:
-            eps_vec = np.full(V.shape[1], eps_vec.item())
+            eps_vec = np.full(V.shape[1] // 2, eps_vec.item())
 
         # --- Pre-compute for EACH polyhedron ---
         self.solvers = []
@@ -97,20 +95,20 @@ class ASPOSCBFPolicy:
         C_list = [np.zeros(self.s_dim)]
         for j in range(1, H_max + 1): C_list.append(C_list[-1] + A_pows[j - 1] @ c)
 
+        def rel_degree(p: np.ndarray) -> Optional[int]:
+            M = B.copy()
+            for r in range(1, H_max + 1):
+                if np.linalg.norm(p @ M, ord=np.inf) > 1e-4:
+                    return r
+                M = A @ M
+            return None
+        
         for poly in self.safe_polys:
 
             # 2. Pre-compute face info for the current polyhedron
             #print(poly.shape)
             P_sel, b_sel = poly[:, :-1].astype(float), poly[:, -1].astype(float)
             faces = [(P_sel[i, :], float(b_sel[i])) for i in range(P_sel.shape[0])]
-
-            def rel_degree(p: np.ndarray) -> Optional[int]:
-                M = B.copy()
-                for r in range(1, H_max + 1):
-                    if np.linalg.norm(p @ M, ord=np.inf) > 1e-4:
-                        return r
-                    M = A @ M
-                return None
 
             face_info = [(p, b, rel_degree(p)) for (p, b) in faces]
             r_vals = [r for (_, _, r) in face_info if r is not None]

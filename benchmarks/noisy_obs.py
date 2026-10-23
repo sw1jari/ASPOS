@@ -3,14 +3,19 @@ import numpy as np
 class NoisyObservationWrapper:
     """Wraps a gym environment to add uniform noise to the observations.
     Returns o = s + v with v ~ U(-alpha, alpha) per dim, true state s goes in info dict."""
-    def __init__(self, env, alpha, seed):
+    def __init__(self, env, alpha, seed, n_type="uniform"):
         self.env = env
         self.alpha = alpha
         self.rng = np.random.default_rng(seed)
+        self.noise_type = n_type
+
 
     def observe(self, state, info):
         info['true_state'] = state
-        noise = self.rng.uniform(-self.alpha, self.alpha, size=state.shape)
+        if self.noise_type == 'uniform':
+            noise = self.rng.uniform(-self.alpha, self.alpha, size=state.shape)
+        elif self.noise_type == 'gaussian':
+            noise = self.rng.normal(state, self.alpha, size=state.shape)
         return state + noise, info
 
     def reset(self, seed=None):
