@@ -1,5 +1,6 @@
 import numpy as np
 
+SQRT_3 = np.sqrt(3)
 class NoisyObservationWrapper:
     """Wraps a gym environment to add uniform noise to the observations.
     Returns o = s + v with v ~ U(-alpha, alpha) per dim, true state s goes in info dict."""
@@ -15,7 +16,7 @@ class NoisyObservationWrapper:
         if self.noise_type == 'uniform':
             noise = self.rng.uniform(-self.alpha, self.alpha, size=state.shape)
         elif self.noise_type == 'gaussian':
-            noise = self.rng.normal(state, self.alpha, size=state.shape)
+            noise = self.rng.normal(0, self.alpha/SQRT_3, size=state.shape)
         return state + noise, info
 
     def reset(self, seed=None):

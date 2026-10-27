@@ -50,7 +50,7 @@ class ExperimentConfig():
         wp: bool = False,
         aspos: bool = True,
         ppo: bool = True,
-        noise_type = "uniform"
+        noise_type: str = "uniform"
     ):
         self.env_name = env_name
         self.gamma = gamma
@@ -187,4 +187,5 @@ def run_exps():
 
 
 if __name__ == "__main__":
+    #_run_group(("pendulum", "RAMPS", "PPO", 0.1, [1]))
     run_exps()
