@@ -15,7 +15,8 @@ class NoisyObservationWrapper:
         if self.noise_type == 'uniform':
             noise = self.rng.uniform(-self.alpha, self.alpha, size=state.shape)
         elif self.noise_type == 'gaussian':
-            noise = self.rng.normal(state, self.alpha, size=state.shape)
+            # slpha / sqrt(3) to get same standard deviation as uniform noise
+            noise = self.rng.normal(0, self.alpha / np.sqrt(3), size=state.shape)
         return state + noise, info
 
     def reset(self, seed=None):
