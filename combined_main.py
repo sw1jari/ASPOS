@@ -7,7 +7,7 @@ import itertools
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from src import Shield, PPOPolicy, SACPolicy, ProjectionPolicy, CBFPolicy, ASPOSCBFPolicy
+from src import Shield, KalmanEstimate, PPOPolicy, SACPolicy, ProjectionPolicy, CBFPolicy, ASPOSCBFPolicy
 from koopman.env_model import get_environment_model
 from constraints import safety
 from benchmarks import envs
@@ -39,7 +39,7 @@ def run_experiment(args):
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     run_params = f"H{args.horizon}_S{args.seed}_N{args.noise}"
     safe_suffix = '_safe' if not args.no_safety else ''
-    name = f"{timestamp}_{'ASPOS' if args.aspos else 'RAMPS'}_{'PPO' if args.ppo else 'SAC'}_{args.env_name}_{run_params}{safe_suffix}"
+    name = f"{timestamp}_{'BCBF' if args.bcbf else 'ASPOS' if args.aspos else 'RAMPS'}_{'PPO' if args.ppo else 'SAC'}_{args.env_name}_{run_params}{safe_suffix}"
     writer = SummaryWriter(f'runs/{name}')
 
     hyperparams = vars(args)
@@ -226,8 +226,23 @@ def run_experiment(args):
             env.transformed_safe_polys = polys
             env.transformed_polys = unsafe_domains
 
+            # Steady state Kalman estimate for the belief CBF.
+            # Estimate only gets set if args.bcbf is True, otherwise it is None and RAMPS/ASPOS use nominal state.
+            estimate = None
+            if args.bcbf:
+                n_s = env.observation_space.shape[0]
+                # Eq. (9): x_dot = f(x) + g(x) u + w with f and g known
+                # Ours: learned x_next = A x + B u + c, mat = [A | B | c]
+                mat, _ = env_model.get_matrix_at_point(np.zeros(n_s + env.action_space.shape[0]), n_s)
+                # Eq. (9): w ~ N(0, Q) with Q known
+                # Ours: estimated from one-step errors on observations, o_next - (A o + B u + c) = w + v_next - A v
+                res = (next_states[:, 0] - mean) / std - env_model.predict_trajectory((states - mean) / std, actions)[:, 0]
+                # Eq. (10): z_k = l(x_k) + v_k, v_k ~ N(0, R) with R known
+                # Ours: l(x) = x and v ~ U(-alpha, alpha), so R = alpha^2 / 3, over std^2 for normalised units
+                estimate = KalmanEstimate(mat, res, np.diag(args.noise ** 2 / 3 / std ** 2))
+
             if not args.wp:
-                if args.aspos:
+                if args.aspos and not args.bcbf:
                     shield = ASPOSCBFPolicy(
                         env_model, new_obs_space, env.observation_space,
                         env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
@@ -236,13 +251,13 @@ def run_experiment(args):
                     shield = CBFPolicy(
                         env_model, new_obs_space, env.observation_space,
                         env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform,
-                        args.cbf_gamma)
+                        args.cbf_gamma, belief=(estimate, args.bcbf_delta, args.bcbf_eps) if args.bcbf else None)
             else:
                 shield = ProjectionPolicy(
                     env_model, new_obs_space,
                     env.action_space, args.horizon, env.transformed_polys, env.transformed_safe_polys, env_model.koopman_model.transform)
 
-            safe_agent = Shield(shield, agent, mean, std)
+            safe_agent = Shield(shield, agent, mean, std, estimate)
 
             start_time = time.time()
             shield.update_model()
@@ -422,6 +437,9 @@ if __name__ == "__main__":
     parser.add_argument('--dynamics', default=None, type=str)
     parser.add_argument('--cbf_alpha', type=float, default=0.1)
     parser.add_argument('--noise', type=float, default=0.0)
+    parser.add_argument('--bcbf', default=False, action='store_true', help='Belief CBF of Vahs, Pek and Tumova 2023')
+    parser.add_argument('--bcbf_delta', default=0.01, type=float, help='Belief CBF risk level delta, the paper uses 0.01')
+    parser.add_argument('--bcbf_eps', default=0.01, type=float, help='Belief CBF probability eps that an observation pushes the belief out')
     parser.add_argument('--verbosity', type=int, default=0)
 
     parser.add_argument('--policy', default="Gaussian",
