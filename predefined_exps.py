@@ -39,6 +39,9 @@ class ExperimentConfig():
         dynamics: str = None,
         cbf_alpha: float = 0.1,
         noise: float = 0.1,
+        bcbf: bool = False,
+        bcbf_delta: float = 0.01,
+        bcbf_eps: float = 0.01,
         verbosity: int = 0,
         policy: str = "Gaussian",
         tau: float = 0.005,
@@ -72,6 +75,9 @@ class ExperimentConfig():
         self.dynamics = dynamics
         self.cbf_alpha = cbf_alpha
         self.noise = noise
+        self.bcbf = bcbf
+        self.bcbf_delta = bcbf_delta
+        self.bcbf_eps = bcbf_eps
         self.verbosity = verbosity
 
         self.policy = policy

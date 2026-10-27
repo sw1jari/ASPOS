@@ -6,6 +6,7 @@ import torch
 from koopman.env_model import KoopmanLinearModel
 import osqp
 import scipy.sparse as sp
+import scipy.special
 
 class CBFPolicy:
     """
@@ -26,7 +27,8 @@ class CBFPolicy:
         unsafe_polys: List[np.ndarray],
         safe_polys: List[np.ndarray],
         transform=lambda x: x,
-        gamma=0.7
+        gamma=0.7,
+        belief=None
     ):
         """
         Args:
@@ -54,6 +56,8 @@ class CBFPolicy:
         self.saved_action = None
         self.shielded = False
         self.gamma = gamma
+        # (KalmanEstimate, delta, eps) for the belief CBF of Vahs, Pek and Tumova 2023, None for RAMPS / ASPOS
+        self.belief = belief
 
         # --- Placeholders for the pre-computed model and solver ---
         self.precomputed = {}
@@ -121,6 +125,32 @@ class CBFPolicy:
                 )
                 for p, _, _ in face_info
             }
+            # Tightening of today's barrier, zero for RAMPS
+            tighten0 = {tuple(p): 0.0 for p, _, _ in face_info}
+            if self.belief is not None:
+                # Belief CBF of Vahs, Pek and Tumova 2023, equation numbers of arXiv:2309.06499
+                # Eq. (12), (24): h(b) = alpha^T mu - beta - erfinv(1 - 2 delta) sqrt(2 alpha^T Sigma alpha) - gamma
+                # Ours: alpha = -p and beta = b, so h(b) = -(p mu + b) - Gamma, with the margin Gamma built here
+                kalman, delta, eps_b = self.belief
+                erf_delta = scipy.special.erfinv(1 - 2 * delta)
+                # Eq. (14): Sigma_dot = A Sigma + Sigma A^T + Q, from the posterior right after an observation
+                # Ours: S_0 = (I - K) P, then one step S_j = A S_(j-1) A^T + Q
+                S = [(np.eye(self.s_dim) - kalman.K) @ kalman.P]
+                for _ in range(H_max):
+                    S.append(A @ S[-1] @ A.T + kalman.Q)
+                # Eq. (17): Lambda = K (H Sigma H^T + R) K^T, the covariance of the jump in mu at an observation
+                # Ours: H = I and Sigma = S_1, the prior at the next observation
+                Lam = kalman.K @ (S[1] + kalman.R) @ kalman.K.T
+                for p, _, _ in face_info:
+                    # Eq. (21), (22): xi, how much h rises when an observation shrinks Sigma- to (I - K H) Sigma-
+                    # Ours: Sigma- = S_1 and H = I, clipped for noise 0 where (I - K) S_1 is zero up to rounding
+                    xi = erf_delta * (np.sqrt(2 * p @ S[1] @ p) - np.sqrt(max(0.0, 2 * p @ (np.eye(self.s_dim) - kalman.K) @ S[1] @ p)))
+                    # Theorem 3: gamma >= sqrt(2 alpha^T Lambda alpha) erfinv(1 - 2 eps) - xi keeps b safe with prob 1 - eps
+                    # Ours: shrink is the smallest such gamma, at least 0 as Eq. (24) needs
+                    shrink = max(0.0, np.sqrt(2 * p @ Lam @ p) * scipy.special.erfinv(1 - 2 * eps_b) - xi)
+                    # Eq. (12), (24) margin j steps ahead, Gamma_j = erfinv(1 - 2 delta) sqrt(2 p S_j p) + gamma
+                    tighten_pref[tuple(p)] = np.array([erf_delta * np.sqrt(2 * p @ S[j] @ p) for j in range(1, H_max + 1)]) + shrink
+                    tighten0[tuple(p)] = erf_delta * np.sqrt(max(0.0, 2 * p @ S[0] @ p)) + shrink
 
             # 4. Build global constraint matrices for this polyhedron
             G_rows, M_h_rows, v_h_rows, row_ptrs = [], [], [], [[] for _ in range(H_max)]
@@ -130,10 +160,14 @@ class CBFPolicy:
                 for p, b, r in face_info:
                     if r is None or j < r:
                         continue
+                    # Eq. (19): dh/dt >= -h between observations
+                    # Ours: h(b_r) >= lam^r h(b_0) at the relative degree r only, the RAMPS row below with Gamma_r and Gamma_0
+                    if self.belief is not None and j > r:
+                        continue
                     G_rows.append(sp.csr_matrix(p @ phi_j))
                     M_h_rows.append(-p @ A_pows[j] + (self.gamma ** j) * p)
                     tighten = tighten_pref[tuple(p)][j - 1]
-                    v_h_rows.append(-p @ C_list[j] - b - tighten + (self.gamma ** j) * (b))
+                    v_h_rows.append(-p @ C_list[j] - b - tighten + (self.gamma ** j) * (b + tighten0[tuple(p)]))
                     row_ptrs[j - 1].append(len(G_rows) - 1)
 
             G_all = (
